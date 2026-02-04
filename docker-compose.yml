@@ -16,6 +16,16 @@ services:
       timeout: 5s
       retries: 5
 
+  fir-ocr:
+    container_name: fir-ocr
+    shm_size: "1gb"
+    build:
+      context: ../fir
+      dockerfile: Dockerfile.headless
+    restart: always
+    environment:
+      - TZ=America/Los_Angeles
+
   hexmaster_bot:
     build: .
     container_name: hexmaster_bot
@@ -23,12 +33,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      fir-ocr:
+        condition: service_started
     env_file:
       - .env
     environment:
       # This overrides the local localhost URL for internal container networking
       - DATABASE_URL=postgresql+asyncpg://hexmaster:hexmaster@postgres:5432/hexmaster
-      - OCR_URL=http://192.168.50.44:5000
+      - OCR_URL=http://fir-ocr:5000
     volumes:
       - shared_data:/app/shared
 

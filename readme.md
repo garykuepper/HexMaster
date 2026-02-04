@@ -69,20 +69,28 @@ While the core logic is now stable, the following UI and feature enhancements ar
 
 - Docker & Docker Compose
 - Discord Bot Token
+- [FIR](https://github.com/GICodeWarrior/fir) (cloned in the same parent directory)
 
 ### 2) Environment Setup
 
-Create a `.env` file from `.env.example`:
+1. Create a `.env` file from `.env.example`:
 
-```env
-DISCORD_TOKEN=your_token_here
-DATABASE_URL=postgresql+asyncpg://hexmaster:hexmaster@postgres:5432/hexmaster
-OCR_URL=http://your_ocr_service_ip:5000
-```
+   ```env
+   DISCORD_TOKEN=your_token_here
+   DATABASE_URL=postgresql+asyncpg://hexmaster:hexmaster@postgres:5432/hexmaster
+   OCR_URL=http://fir-ocr:5000
+   ```
+
+2. Ensure the `fir` repository is cloned alongside `Hexmaster`:
+
+   ```bash
+   cd ..
+   git clone https://github.com/GICodeWarrior/fir.git
+   ```
 
 ### 3) Launch
 
-Start the bot and database:
+Start the entire stack (Bot + Database + OCR Service):
 
 ```bash
 docker compose up --build -d

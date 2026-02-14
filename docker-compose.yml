@@ -16,6 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - hexmaster-net
 
   hexmaster_bot:
     image: ghcr.io/garykuepper/hexmaster:main
@@ -25,15 +27,65 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      fs:
+        condition: service_healthy
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://hexmaster:hexmaster@127.0.0.1:5432/hexmaster
-      - OCR_URL=http://localhost:8000
+      - DATABASE_URL=postgresql+asyncpg://hexmaster:hexmaster@postgres:5432/hexmaster
+      - OCR_URL=http://fs:8000
       - WARAPI_BASE_URL=https://war-service-live.foxholeservices.com/api
     volumes:
       - shared_data:/app/shared
-    network_mode: host
+    networks:
+      - hexmaster-net
+
+  fs:
+    build:
+      context: ../foxhole-stockpiles
+      dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+        # Git info args - automatically passed by docker-build.sh
+        GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-unknown}
+        GIT_COMMIT_SHORT_HASH: ${GIT_COMMIT_SHORT_HASH:-unknown}
+        GIT_COMMIT_DATE: ${GIT_COMMIT_DATE:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-unknown}
+    image: fs:latest
+    container_name: fs
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - FS_API_SERVER__HOST=0.0.0.0
+      - FS_SCANNER__DATABASE_PATH=/app/data/fs_vanilla.h5
+      - 'FS_OUTPUT__HANDLERS=[{"name": "Return", "handler": {"type": "return"}}]'
+      # Memory optimization - Use jemalloc (set to empty to disable)
+      - LD_PRELOAD=${LD_PRELOAD:-/usr/lib/x86_64-linux-gnu/libjemalloc.so.2}
+      - FS_API_SERVER__WORKERS=10
+    volumes:
+      # User configuration file
+      - ${FS_CONFIG_FILE:-../foxhole-stockpiles/.fs_config}:/home/appuser/.fs_config:ro
+      # Template database directory (required)
+      - ${FS_DATA_DIR:-../foxhole-stockpiles/data}:/app/data:ro
+      # Screenshots directory
+      - ${FS_SCREENSHOTS_DIR:-../foxhole-stockpiles/screenshots}:/app/screenshots
+      # Logs directory
+      - ${FS_LOGS_DIR:-../foxhole-stockpiles/logs}:/app/logs
+      # Optional: Custom tessdata models
+      - ${FS_TESSDATA_DIR:-../foxhole-stockpiles/tessdata}:/app/tessdata:ro
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - hexmaster-net
+
+networks:
+  hexmaster-net:
+    driver: bridge
 
 volumes:
   pgdata:

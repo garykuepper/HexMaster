@@ -30,9 +30,7 @@ class SetupCog(commands.Cog):
         default_permissions=discord.Permissions(administrator=True),
     )
 
-    @setup_group.command(
-        name="config", description="Set your server's faction and shard"
-    )
+    @setup_group.command(name="config", description="Set your server's faction and shard")
     @app_commands.describe(
         faction="Your faction (Colonial or Warden)",
         shard="The shard you are playing on (Alpha, Bravo, or Charlie)",
@@ -56,15 +54,11 @@ class SetupCog(commands.Cog):
     ) -> None:
         """Updates the server configuration."""
         if not interaction.guild_id:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            return await send_error(interaction, "This command can only be used in a server.")
 
         await interaction.response.defer(ephemeral=True)
         try:
-            await self.settings_repo.upsert_config(
-                interaction.guild_id, faction=faction, shard=shard
-            )
+            await self.settings_repo.upsert_config(interaction.guild_id, faction=faction, shard=shard)
 
             msg = "Configuration updated!"
             if faction:
@@ -76,9 +70,7 @@ class SetupCog(commands.Cog):
         except Exception as e:
             await send_error(interaction, f"Error updating configuration: {e}")
 
-    @setup_group.command(
-        name="priorities", description="Load default priorities for your server"
-    )
+    @setup_group.command(name="priorities", description="Load default priorities for your server")
     @app_commands.describe(template="The priority template to load")
     @app_commands.choices(
         template=[
@@ -86,28 +78,20 @@ class SetupCog(commands.Cog):
             app_commands.Choice(name="Clear All", value="clear"),
         ]
     )
-    async def load_priorities(
-        self, interaction: discord.Interaction, template: str
-    ) -> None:
+    async def load_priorities(self, interaction: discord.Interaction, template: str) -> None:
         """Loads a priority template or clears existing priorities."""
         if not interaction.guild_id:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            return await send_error(interaction, "This command can only be used in a server.")
 
         await interaction.response.defer(ephemeral=True)
         try:
             if template == "clear":
                 await self.repo.delete_all_priorities(interaction.guild_id)
-                return await send_success(
-                    interaction, "Cleared all priorities for this server."
-                )
+                return await send_success(interaction, "Cleared all priorities for this server.")
 
             if template == "standard":
                 await self._load_standard_priorities(interaction.guild_id)
-                await send_success(
-                    interaction, "Loaded standard logistics priorities from template."
-                )
+                await send_success(interaction, "Loaded standard logistics priorities from template.")
 
         except Exception as e:
             await send_error(interaction, f"Error loading priorities: {e}")
@@ -130,22 +114,16 @@ class SetupCog(commands.Cog):
                 name=row["Name"],
                 qty_per_crate=int(row["Qty per Crate"]),
                 min_for_base_crates=(
-                    int(row["Min For Base (crates)"])
-                    if pd.notna(row["Min For Base (crates)"])
-                    else None
+                    int(row["Min For Base (crates)"]) if pd.notna(row["Min For Base (crates)"]) else None
                 ),
                 priority=float(row["Priority"]),
             )
 
-    @setup_group.command(
-        name="cleanup_commands", description="Clear legacy guild-specific commands"
-    )
+    @setup_group.command(name="cleanup_commands", description="Clear legacy guild-specific commands")
     async def cleanup_commands(self, interaction: discord.Interaction) -> None:
         """Removes all commands synced specifically to this guild to resolve duplicates."""
         if not interaction.guild:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            return await send_error(interaction, "This command can only be used in a server.")
 
         await interaction.response.defer(ephemeral=True)
         try:

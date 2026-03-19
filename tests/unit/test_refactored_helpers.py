@@ -1,8 +1,9 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from hexmaster.bot.cogs.stockpile_cog import StockpileCog
 from hexmaster.services.stockpile_service import StockpileService
 

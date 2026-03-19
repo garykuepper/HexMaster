@@ -46,11 +46,7 @@ class PaginatorView(discord.ui.View):
 
     def _create_embed(self) -> discord.Embed:
         """Creates an embed for the current page."""
-        indicator = (
-            f" (Page {self.current_page + 1}/{len(self.pages)})"
-            if len(self.pages) > 1
-            else ""
-        )
+        indicator = f" (Page {self.current_page + 1}/{len(self.pages)})" if len(self.pages) > 1 else ""
         return discord.Embed(
             title=f"{self.title}{indicator}",
             description=f"```ansi\n{self.pages[self.current_page]}\n```",
@@ -58,18 +54,14 @@ class PaginatorView(discord.ui.View):
         )
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
-    async def previous_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Handles the 'Previous' button click."""
         self.current_page -= 1
         self._update_buttons()
         await self._update_message(interaction)
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.gray)
-    async def next_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Handles the 'Next' button click."""
         self.current_page += 1
         self._update_buttons()
@@ -89,18 +81,14 @@ async def render_and_truncate_table(
 ) -> None:
     """Renders a table using ANSI colors in a monospaced code block with pagination."""
     if not rows:
-        await send_success(
-            interaction, "No data to display.", title=title, ephemeral=ephemeral
-        )
+        await send_success(interaction, "No data to display.", title=title, ephemeral=ephemeral)
         return
 
     # Discord Description Limit is 4096. Use 3800 for safety.
     desc_limit = 3800
     full_table_str = tabulate(rows, headers=headers, tablefmt="simple")
     lines = full_table_str.split("\n")
-    header_str = (
-        "\n".join([f"\u001b[1;37m{line}\u001b[0m" for line in lines[:2]]) + "\n"
-    )
+    header_str = "\n".join([f"\u001b[1;37m{line}\u001b[0m" for line in lines[:2]]) + "\n"
     data_lines = lines[2:]
 
     pages = []
@@ -114,9 +102,7 @@ async def render_and_truncate_table(
             colored_line = f"\u001b[0;{row_colors[i]}m{line}\u001b[0m"
 
         line_len = len(colored_line) + 1
-        if current_page_lines and (
-            current_len + line_len > desc_limit or current_row_count >= max_rows
-        ):
+        if current_page_lines and (current_len + line_len > desc_limit or current_row_count >= max_rows):
             pages.append(header_str + "\n".join(current_page_lines))
             current_page_lines = []
             current_len = len(header_str)
@@ -189,9 +175,7 @@ async def send_success(
     ephemeral: bool = True,
 ) -> None:
     """Sends a standardized success message."""
-    embed = discord.Embed(
-        title=f"✅ {title}", description=message, color=EMBED_COLOR_SUCCESS
-    )
+    embed = discord.Embed(title=f"✅ {title}", description=message, color=EMBED_COLOR_SUCCESS)
     await send_response(interaction, embed=embed, ephemeral=ephemeral)
 
 
@@ -202,7 +186,5 @@ async def send_error(
     ephemeral: bool = True,
 ) -> None:
     """Sends a standardized error message."""
-    embed = discord.Embed(
-        title=f"❌ {title}", description=message, color=EMBED_COLOR_ERROR
-    )
+    embed = discord.Embed(title=f"❌ {title}", description=message, color=EMBED_COLOR_ERROR)
     await send_response(interaction, embed=embed, ephemeral=ephemeral)

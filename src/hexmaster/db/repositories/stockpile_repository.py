@@ -3,9 +3,6 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import desc, insert, select, text
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from hexmaster.db.models import (
     CatalogItem,
     Priority,
@@ -14,6 +11,8 @@ from hexmaster.db.models import (
     StockpileSnapshot,
     Town,
 )
+from sqlalchemy import desc, insert, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 
 # TODO: Add docstrings

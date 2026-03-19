@@ -3,10 +3,9 @@
 
 import asyncio
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.repositories.stockpile_repository import StockpileRepository
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def test_inventory_query():
@@ -24,9 +23,8 @@ async def test_inventory_query():
         print(f"First 5 rows: {rows[:5]}")
     else:
         # Check if subquery returns anything
-        from sqlalchemy import desc, select
-
         from hexmaster.db.models import StockpileSnapshot
+        from sqlalchemy import desc, select
 
         async with engine.connect() as conn:
             subq = (

@@ -3,10 +3,9 @@
 
 import asyncio
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.repositories.stockpile_repository import StockpileRepository
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def test_hub_filter():

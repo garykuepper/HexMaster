@@ -3,11 +3,10 @@
 
 import asyncio
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.repositories.stockpile_repository import StockpileRepository
 from hexmaster.services.war_service import WarService
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def test_stale_warning():
@@ -18,6 +17,7 @@ async def test_stale_warning():
 
     town = "Tine"
     guild_id = 999
+    shard = "Alpha"
     current_war = await war_service.get_current_war_number()
     past_war = (current_war - 1) if current_war else 100
 
@@ -25,14 +25,14 @@ async def test_stale_warning():
     print(f"Mocking a snapshot for {town} from War {past_war}...")
 
     # Ingest a snapshot with a past war number
-    await repo.ingest_snapshot(guild_id, town, "Seaport", "StaleStockpile", [], past_war)
+    await repo.ingest_snapshot(guild_id, shard, town, "Seaport", "StaleStockpile", [], past_war)
 
     # Fetch inventory
-    _ = await repo.get_latest_inventory(guild_id, town)
+    _ = await repo.get_latest_inventory(guild_id, shard, town)
 
     # Note: inventory join currently requires items to be in the snapshot to show up in get_latest_inventory
     # So I should probably check get_latest_snapshot_for_town_filtered instead
-    snapshot, items = await repo.get_latest_snapshot_for_town_filtered(guild_id, town)
+    snapshot, items = await repo.get_latest_snapshot_for_town_filtered(guild_id, shard, town)
 
     if snapshot:
         war_num = snapshot.get("war_number")

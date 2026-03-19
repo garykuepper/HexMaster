@@ -1,16 +1,14 @@
-import pytest
 import pandas as pd
+import pytest
+from hexmaster.db.models import CatalogItem, Priority, Region, Town
 from sqlalchemy import insert
-from hexmaster.db.models import Region, Town, CatalogItem, Priority
 
 GUILD_ID = 987654321
 SHARD = "Alpha"
 
 
 @pytest.mark.asyncio
-async def test_process_remote_and_ingest_success(
-    stockpile_service, mock_ocr_service, repo, engine
-):
+async def test_process_remote_and_ingest_success(stockpile_service, mock_ocr_service, repo, engine):
     """Test full flow of OCR processing and database ingestion."""
     df = pd.DataFrame(
         [
@@ -112,9 +110,7 @@ async def test_get_requisition_comparison(stockpile_service, repo, engine):
         ],
     )
 
-    result = await stockpile_service.get_requisition_comparison(
-        GUILD_ID, "Hub2001", "Front2001", SHARD
-    )
+    result = await stockpile_service.get_requisition_comparison(GUILD_ID, "Hub2001", "Front2001", SHARD)
     data = result["comparison_data"]
     assert len(data) == 1
     assert data[0]["Item"] == "Rifle 2001"
@@ -126,15 +122,9 @@ async def test_locate_item_system(stockpile_service, repo, engine):
     """Test locating an item and sorting by distance."""
     async with engine.begin() as conn:
         await conn.execute(insert(Region).values(id=2002, name="R2002", q=0, r=0))
-        await conn.execute(
-            insert(Town).values(name="Ref2002", region_id=2002, x=0.5, y=0.5)
-        )
-        await conn.execute(
-            insert(Town).values(name="Near2002", region_id=2002, x=0.6, y=0.6)
-        )
-        await conn.execute(
-            insert(Town).values(name="Far2002", region_id=2002, x=0.9, y=0.9)
-        )
+        await conn.execute(insert(Town).values(name="Ref2002", region_id=2002, x=0.5, y=0.5))
+        await conn.execute(insert(Town).values(name="Near2002", region_id=2002, x=0.6, y=0.6))
+        await conn.execute(insert(Town).values(name="Far2002", region_id=2002, x=0.9, y=0.9))
         await conn.execute(
             insert(CatalogItem).values(
                 codename="mat2002",
@@ -179,9 +169,7 @@ async def test_locate_item_system(stockpile_service, repo, engine):
         ],
     )
 
-    results, ref_town = await stockpile_service.locate_item(
-        GUILD_ID, "Mat 2002", "Ref2002", SHARD
-    )
+    results, ref_town = await stockpile_service.locate_item(GUILD_ID, "Mat 2002", "Ref2002", SHARD)
 
     assert len(results) == 2
     assert results[0]["Town"] == "Near2002"

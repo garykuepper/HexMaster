@@ -4,11 +4,10 @@
 import asyncio
 
 import pandas as pd
+from hexmaster.config import Settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from tabulate import tabulate
-
-from hexmaster.config import Settings
 
 SQL_LATEST_ITEMS_PER_KEY_FOR_TOWN = """
                                     WITH latest_per_key

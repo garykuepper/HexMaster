@@ -11,9 +11,7 @@ import pandas as pd
 class OCRServiceError(Exception):
     """Custom exception for OCR Service failures."""
 
-    def __init__(
-        self, status: int, message: str, technical_details: Optional[str] = None
-    ) -> None:
+    def __init__(self, status: int, message: str, technical_details: Optional[str] = None) -> None:
         """Initializes the OCRServiceError."""
         super().__init__(message)
         self.status = status
@@ -45,9 +43,7 @@ class OCRService:
 
         data = aiohttp.FormData()
         # FS expects the file field to be named 'image'
-        data.add_field(
-            "image", image_bytes, filename="screenshot.png", content_type="image/png"
-        )
+        data.add_field("image", image_bytes, filename="screenshot.png", content_type="image/png")
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -65,16 +61,12 @@ class OCRService:
         """Internal helper to handle the FS JSON response."""
         if resp.status != 200:
             raw_text = await resp.text()
-            raise OCRServiceError(
-                resp.status, f"FS Service returned error: {raw_text[:200]}"
-            )
+            raise OCRServiceError(resp.status, f"FS Service returned error: {raw_text[:200]}")
 
         try:
             data = await resp.json()
         except Exception:
-            raise OCRServiceError(
-                resp.status, "Failed to decode JSON response from FS."
-            )
+            raise OCRServiceError(resp.status, "Failed to decode JSON response from FS.")
 
         if not isinstance(data, dict):
             return pd.DataFrame()
@@ -87,9 +79,7 @@ class OCRService:
 
         return self._parse_items_to_df(stockpile_data, fallback_label)
 
-    def _parse_items_to_df(
-        self, data: Dict[str, Any], fallback_label: Optional[str]
-    ) -> pd.DataFrame:
+    def _parse_items_to_df(self, data: Dict[str, Any], fallback_label: Optional[str]) -> pd.DataFrame:
         """Parses the stockpile items into a standardized DataFrame."""
         detected_name = data.get("name")
         detected_type = data.get("type")

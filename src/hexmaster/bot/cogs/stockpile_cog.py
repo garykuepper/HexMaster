@@ -48,7 +48,7 @@ class StockpileCog(commands.Cog):
         if not guild_id:
             return "Alpha"
         config = await self.settings_repo.get_config(guild_id)
-        return config.shard if config else "Alpha"
+        return (config.shard or "Alpha") if config else "Alpha"
 
     async def _get_cached_town_choices(
         self, current: str, cache_key: str, fetch_func: Any
@@ -63,20 +63,14 @@ class StockpileCog(commands.Cog):
 
         # Fetch fresh data
         try:
-            towns = await (
-                fetch_func()
-                if inspect.iscoroutinefunction(fetch_func)
-                else asyncio.to_thread(fetch_func)
-            )
+            towns = await (fetch_func() if inspect.iscoroutinefunction(fetch_func) else asyncio.to_thread(fetch_func))
             self._autocomplete_cache[cache_key] = (now, towns)
             return self._filter_choices(current, towns)
         except Exception as e:
             print(f"Autocomplete error for {cache_key}: {e}")
             return []
 
-    def _filter_choices(
-        self, current: str, items: List[str]
-    ) -> List[app_commands.Choice[str]]:
+    def _filter_choices(self, current: str, items: List[str]) -> List[app_commands.Choice[str]]:
         """Filters a list of strings into a list of discord.py Choices."""
         search = current.lower().strip()
         choices = []
@@ -104,9 +98,7 @@ class StockpileCog(commands.Cog):
 
         try:
             items = await (
-                fetch_func(*args)
-                if inspect.iscoroutinefunction(fetch_func)
-                else asyncio.to_thread(fetch_func, *args)
+                fetch_func(*args) if inspect.iscoroutinefunction(fetch_func) else asyncio.to_thread(fetch_func, *args)
             )
             self._autocomplete_cache[f_key] = (now, items)
             return self._filter_choices(current, items)
@@ -114,12 +106,8 @@ class StockpileCog(commands.Cog):
             print(f"Autocomplete error for {f_key}: {e}")
             return []
 
-    @app_commands.command(
-        name="report", description="File an Intelligence Report (upload screenshot)"
-    )
-    @app_commands.describe(
-        image="Stockpile screenshot", town="Town Name", stockpile="Stockpile Name"
-    )
+    @app_commands.command(name="report", description="File an Intelligence Report (upload screenshot)")
+    @app_commands.describe(image="Stockpile screenshot", town="Town Name", stockpile="Stockpile Name")
     async def report(
         self,
         interaction: discord.Interaction,
@@ -129,12 +117,12 @@ class StockpileCog(commands.Cog):
     ) -> None:
         """Processes an image report and ingests items into the database."""
         if not interaction.guild_id:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            await send_error(interaction, "This command can only be used in a server.")
+            return
 
         if not image.content_type or not image.content_type.startswith("image/"):
-            return await send_error(interaction, "Please upload a valid image file.")
+            await send_error(interaction, "Please upload a valid image file.")
+            return
 
         await interaction.response.defer(ephemeral=True)
         try:
@@ -164,11 +152,10 @@ class StockpileCog(commands.Cog):
         """Utility to fetch the current war number for a given shard."""
         if not self.war_service:
             return None
-        return await self.war_service.get_current_war_number(shard)
+        war_num = await self.war_service.get_current_war_number(shard)
+        return int(war_num) if war_num is not None else None
 
-    async def _handle_ocr_error(
-        self, interaction: discord.Interaction, e: OCRServiceError
-    ) -> None:
+    async def _handle_ocr_error(self, interaction: discord.Interaction, e: OCRServiceError) -> None:
         """Centralized error handling for OCR-specific failures."""
         print(f"OCR Service Error: {e.message}\nDetails: {e.technical_details}")
         await send_error(
@@ -184,16 +171,10 @@ class StockpileCog(commands.Cog):
     async def report_town_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        return await self._get_cached_town_choices(
-            current, "all_towns", self.repo.get_all_towns
-        )
+        return await self._get_cached_town_choices(current, "all_towns", self.repo.get_all_towns)
 
-    @app_commands.command(
-        name="inventory", description="View the Inventory for a specific town"
-    )
-    @app_commands.describe(
-        town="Town Name", structure="Structure Type", stockpile="Stockpile Name"
-    )
+    @app_commands.command(name="inventory", description="View the Inventory for a specific town")
+    @app_commands.describe(town="Town Name", structure="Structure Type", stockpile="Stockpile Name")
     async def view_inventory(
         self,
         interaction: discord.Interaction,
@@ -203,17 +184,15 @@ class StockpileCog(commands.Cog):
     ) -> None:
         """Displays a formatted table of items in a specified town's stockpile."""
         if not interaction.guild_id:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            await send_error(interaction, "This command can only be used in a server.")
+            return
 
         town_input = town.strip() if town else ""
         if not town_input:
-            return await send_error(interaction, "Town is required.")
+            await send_error(interaction, "Town is required.")
+            return
 
-        await self._send_inventory_results(
-            interaction, interaction.guild_id, town_input, structure, stockpile
-        )
+        await self._send_inventory_results(interaction, interaction.guild_id, town_input, structure, stockpile)
 
     async def _send_inventory_results(
         self,
@@ -226,19 +205,12 @@ class StockpileCog(commands.Cog):
     ) -> None:
         """Reusable helper to fetch inventory and render table."""
         shard = await self._get_shard(guild_id)
-        rows = await self.repo.get_latest_inventory(
-            guild_id, shard, town_name, structure, stockpile
-        )
+        rows = await self.repo.get_latest_inventory(guild_id, shard, town_name, structure, stockpile)
 
         if not rows:
-            filter_msg = (
-                f" (filtered by `{structure}`/ `{stockpile}`)"
-                if structure or stockpile
-                else ""
-            )
-            return await send_error(
-                interaction, f"No snapshots found for `{town_name}`{filter_msg}."
-            )
+            filter_msg = f" (filtered by `{structure}`/ `{stockpile}`)" if structure or stockpile else ""
+            await send_error(interaction, f"No snapshots found for `{town_name}`{filter_msg}.")
+            return
 
         priority_list = await self.repo.get_priority_list(guild_id)
         priority_map = {p["codename"]: p for p in priority_list}
@@ -246,27 +218,19 @@ class StockpileCog(commands.Cog):
         self._sort_inventory_rows(rows, priority_map)
         table_rows = self._format_inventory_table_rows(rows, priority_map)
 
-        title = await self._generate_inventory_title(
-            guild_id, rows, town_name, stockpile
-        )
+        title = await self._generate_inventory_title(guild_id, rows, town_name, stockpile)
         if success_msg:
             title = f"{success_msg}\n{title}"
 
-        await render_and_truncate_table(
-            interaction, table_rows, ["Item", "Qty", "Need", "S"], title, as_embed=True
-        )
+        await render_and_truncate_table(interaction, table_rows, ["Item", "Qty", "Need", "S"], title, as_embed=True)
 
-    def _sort_inventory_rows(
-        self, rows: List[Dict[str, Any]], priority_map: Dict[str, Dict[str, Any]]
-    ) -> None:
+    def _sort_inventory_rows(self, rows: List[Dict[str, Any]], priority_map: Dict[str, Dict[str, Any]]) -> None:
         """Sorts inventory rows by priority, then quantity, then name."""
 
         def sort_key(r: Dict[str, Any]) -> Tuple[float, float, str]:
             p_data = priority_map.get(r["code_name"])
             priority_val = p_data["priority"] if p_data else 9999
-            qty_crates = self.service.get_qty_crates(
-                r["total"], r.get("catalog_qpc"), r.get("per_crate")
-            )
+            qty_crates = self.service.get_qty_crates(r["total"], r.get("catalog_qpc"), r.get("per_crate"))
             return (priority_val, -qty_crates, (r.get("item_name") or "").lower())
 
         rows.sort(key=sort_key)
@@ -279,9 +243,7 @@ class StockpileCog(commands.Cog):
         is_hub = any(h in rows[0]["struct_type"] for h in ["Storage Depot", "Seaport"])
 
         for r in rows:
-            qty = self.service.get_qty_crates(
-                r["total"], r.get("catalog_qpc"), r.get("per_crate")
-            )
+            qty = self.service.get_qty_crates(r["total"], r.get("catalog_qpc"), r.get("per_crate"))
             p_data = priority_map.get(r["code_name"])
 
             min_val = p_data.get("min_for_base_crates", 0) if p_data else 0
@@ -382,9 +344,7 @@ class StockpileCog(commands.Cog):
             shard,
         )
 
-    @app_commands.command(
-        name="requisition", description="Calculate needs between two towns."
-    )
+    @app_commands.command(name="requisition", description="Calculate needs between two towns.")
     @app_commands.describe(
         ship_town="Shipping Town",
         ship_struct="Shipping Structure",
@@ -407,9 +367,7 @@ class StockpileCog(commands.Cog):
     ) -> None:
         """Compares two towns and displays an order of needed supplies."""
         if not interaction.guild_id:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            return await send_error(interaction, "This command can only be used in a server.")
 
         await interaction.response.defer(ephemeral=True)
         try:
@@ -427,9 +385,7 @@ class StockpileCog(commands.Cog):
             )
 
             if not result["comparison_data"]:
-                return await self._handle_fulfilled_requisition(
-                    interaction, recv_town, result
-                )
+                return await self._handle_fulfilled_requisition(interaction, recv_town, result)
 
             table_rows = self._format_requisition_table_rows(result["comparison_data"])
             title = self._generate_requisition_title(ship_town, recv_town, result)
@@ -453,15 +409,11 @@ class StockpileCog(commands.Cog):
             msg = f"{res['warning']}\n{msg}"
         await send_success(interaction, msg, title="Requisition Order Complete")
 
-    def _format_requisition_table_rows(
-        self, data: List[Dict[str, Any]]
-    ) -> List[List[str]]:
+    def _format_requisition_table_rows(self, data: List[Dict[str, Any]]) -> List[List[str]]:
         """Formats item needs and availability for the requisition table."""
         table_rows = []
         for d in data:
-            status = (
-                "🔴" if d["Avail"] <= 0 else ("🟡" if d["Avail"] < d["Need"] else "🟢")
-            )
+            status = "🔴" if d["Avail"] <= 0 else ("🟡" if d["Avail"] < d["Need"] else "🟢")
             tag = " (itm)" if not d.get("is_crated", True) else ""
             name = (d["Item"] or "Unknown")[:20].strip()
             if len(d["Item"] or "") > 20:
@@ -477,9 +429,7 @@ class StockpileCog(commands.Cog):
             )
         return table_rows
 
-    def _generate_requisition_title(
-        self, ship_town: str, recv_town: str, res: Dict[str, Any]
-    ) -> str:
+    def _generate_requisition_title(self, ship_town: str, recv_town: str, res: Dict[str, Any]) -> str:
         """Constructs the directional title for a requisition order."""
         ship_snap, recv_snap = res["ship_snap"], res["recv_snap"]
         s_name = ship_snap.get("pretty_town") if ship_snap else ship_town.title()
@@ -514,19 +464,22 @@ class StockpileCog(commands.Cog):
     async def requisition_ship_struct_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        return await self.inventory_struct_autocomplete(interaction, current)
+        choices: list[app_commands.Choice[str]] = await self.inventory_struct_autocomplete(interaction, current)
+        return choices
 
     @requisition.autocomplete("ship_stockpile")
     async def requisition_ship_stockpile_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        return await self.inventory_stockpile_autocomplete(interaction, current)
+        choices: list[app_commands.Choice[str]] = await self.inventory_stockpile_autocomplete(interaction, current)
+        return choices
 
     @requisition.autocomplete("recv_town")
     async def requisition_recv_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        return await self.inventory_town_autocomplete(interaction, current)
+        choices: list[app_commands.Choice[str]] = await self.inventory_town_autocomplete(interaction, current)
+        return choices
 
     @requisition.autocomplete("recv_struct")
     async def requisition_recv_struct_autocomplete(
@@ -569,26 +522,20 @@ class StockpileCog(commands.Cog):
 
     @app_commands.command(name="locate", description="Locate an item globally.")
     @app_commands.describe(item="Item name (autocomplete)", from_town="Reference town")
-    async def locate(
-        self, interaction: discord.Interaction, item: str, from_town: str
-    ) -> None:
+    async def locate(self, interaction: discord.Interaction, item: str, from_town: str) -> None:
         """Finds where an item is stored, sorted by distance from a town."""
         if not interaction.guild_id:
-            return await send_error(
-                interaction, "This command can only be used in a server."
-            )
+            await send_error(interaction, "This command can only be used in a server.")
+            return
 
         await interaction.response.defer(ephemeral=True)
         try:
             shard = await self._get_shard(interaction.guild_id)
-            results, ref_town = await self.service.locate_item(
-                interaction.guild_id, item, from_town, shard
-            )
+            results, ref_town = await self.service.locate_item(interaction.guild_id, item, from_town, shard)
 
             if not results:
-                return await send_error(
-                    interaction, f"No stockpiles found containing `{item}`."
-                )
+                await send_error(interaction, f"No stockpiles found containing `{item}`.")
+                return
 
             table_rows = []
             for r in results:
@@ -606,7 +553,7 @@ class StockpileCog(commands.Cog):
                 interaction,
                 table_rows,
                 ["Town", "Qty", "Dist", "Age"],
-                f"Global Search: {item} (from {ref_town['name']})",
+                f"Global Search: {item} (from {ref_town['name'] if ref_town else 'Unknown'})",
                 as_embed=True,
             )
         except Exception as e:
@@ -632,7 +579,8 @@ class StockpileCog(commands.Cog):
     async def locate_town_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        return await self.report_town_autocomplete(interaction, current)
+        choices: list[app_commands.Choice[str]] = await self.report_town_autocomplete(interaction, current)
+        return choices
 
 
 async def setup(bot: commands.Bot) -> None:

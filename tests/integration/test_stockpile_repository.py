@@ -1,15 +1,10 @@
-from datetime import datetime, timezone
-
 import pytest
-from sqlalchemy import insert, select
-
 from hexmaster.db.models import (
     CatalogItem,
     Region,
-    SnapshotItem,
-    StockpileSnapshot,
     Town,
 )
+from sqlalchemy import insert
 
 GUILD_ID = 123456789
 SHARD = "Alpha"
@@ -52,9 +47,7 @@ async def test_ingest_snapshot(repo, engine):
         }
     ]
 
-    snapshot_id = await repo.ingest_snapshot(
-        GUILD_ID, SHARD, "Town1001", "Storage Depot", "Public", items
-    )
+    snapshot_id = await repo.ingest_snapshot(GUILD_ID, SHARD, "Town1001", "Storage Depot", "Public", items)
     assert snapshot_id is not None
 
     inventory = await repo.get_latest_inventory(GUILD_ID, SHARD, "Town1001")

@@ -3,10 +3,9 @@
 
 import asyncio
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.repositories.stockpile_repository import StockpileRepository
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def test_war_ingestion():
@@ -23,19 +22,19 @@ async def test_war_ingestion():
     # I'll just use what's likely there or skip item insertion if I can
     items: list[dict] = []
     guild_id = 12345
+    shard = "Alpha"
 
     print(f"Ingesting snapshot for {town} with War {war_number}...")
-    snapshot_id = await repo.ingest_snapshot(guild_id, town, struct, stockpile, items, war_number)
+    snapshot_id = await repo.ingest_snapshot(guild_id, shard, town, struct, stockpile, items, war_number)
     print(f"Inserted snapshot_id: {snapshot_id}")
 
     print(f"Fetching latest inventory for {town}...")
-    await repo.get_latest_inventory(guild_id, town)
+    await repo.get_latest_inventory(guild_id, shard, town)
 
     # Since we inserted 0 items, get_latest_inventory might return nothing if it joins with items
     # Let's check the snapshot header directly instead using a new repo method or simple query
-    from sqlalchemy import select
-
     from hexmaster.db.models import StockpileSnapshot
+    from sqlalchemy import select
 
     async with engine.connect() as conn:
         stmt = select(StockpileSnapshot.war_number).where(StockpileSnapshot.id == snapshot_id)

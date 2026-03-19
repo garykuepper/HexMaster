@@ -4,11 +4,10 @@
 import asyncio
 import os
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.db.models import Base
 from hexmaster.db.repositories.settings_repository import SettingsRepository
 from hexmaster.db.repositories.stockpile_repository import StockpileRepository
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def test_isolation():
@@ -66,13 +65,20 @@ async def test_isolation():
         await conn.execute(insert(Region).values(id=1, name="The Fingers"))
         await conn.execute(insert(Town).values(name="The Fingers", region_id=1, x=0, y=0))
 
-    await repo.ingest_snapshot(guild_a, "the fingers", "Storage Depot", "Public", items, war_number=110)
+    await repo.ingest_snapshot(
+        guild_a,
+        "Alpha",
+        "the fingers",
+        "Storage Depot",
+        "Public",
+        items,
+        war_number=110,
+    )
 
     # Verify directly via select to avoid DISTINCT ON issues in SQLite
     async with engine.connect() as conn:
-        from sqlalchemy import select
-
         from hexmaster.db.models import StockpileSnapshot
+        from sqlalchemy import select
 
         res_a = await conn.execute(select(StockpileSnapshot).where(StockpileSnapshot.guild_id == guild_a))
         res_b = await conn.execute(select(StockpileSnapshot).where(StockpileSnapshot.guild_id == guild_b))

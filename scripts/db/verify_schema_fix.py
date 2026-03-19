@@ -6,11 +6,10 @@ import os
 import sys
 
 sys.path.insert(0, "/app/src")
+import hexmaster.db.init as db_init
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-import hexmaster.db.init as db_init
 
 print(f"📍 hexmaster.db.init file: {db_init.__file__}")
 

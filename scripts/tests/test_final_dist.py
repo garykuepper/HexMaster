@@ -4,10 +4,9 @@
 import asyncio
 import math
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.repositories.stockpile_repository import StockpileRepository
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def verify_final_dist():

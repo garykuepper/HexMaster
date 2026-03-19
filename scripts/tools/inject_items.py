@@ -4,11 +4,10 @@
 import asyncio
 
 import pandas as pd
-from sqlalchemy import insert
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.models import CatalogItem
+from sqlalchemy import insert
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def seed_catalog():

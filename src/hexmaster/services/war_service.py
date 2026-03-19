@@ -39,9 +39,7 @@ class WarService:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise RuntimeError(
-                        f"WarAPI {shard_name or ''} returned status {resp.status}: {error_text}"
-                    )
+                    raise RuntimeError(f"WarAPI {shard_name or ''} returned status {resp.status}: {error_text}")
                 result = await resp.json()
                 return list(result)
 
@@ -52,9 +50,7 @@ class WarService:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise RuntimeError(
-                        f"WarAPI {shard_name or ''} returned status {resp.status}: {error_text}"
-                    )
+                    raise RuntimeError(f"WarAPI {shard_name or ''} returned status {resp.status}: {error_text}")
                 result = await resp.json()
                 return dict(result)
 

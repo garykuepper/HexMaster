@@ -1,4 +1,3 @@
-import pytest
 from hexmaster.utils.geo_utils import calculate_distance
 
 

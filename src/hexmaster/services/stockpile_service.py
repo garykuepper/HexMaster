@@ -5,7 +5,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-
 from hexmaster.utils.geo_utils import calculate_distance
 
 
@@ -18,9 +17,7 @@ class StockpileService:
         self.ocr_service = ocr_service
         self.war_service = war_service
 
-    def get_qty_crates(
-        self, total: float, catalog_qpc: Optional[int], per_crate: Optional[int]
-    ) -> float:
+    def get_qty_crates(self, total: float, catalog_qpc: Optional[int], per_crate: Optional[int]) -> float:
         """Calculates quantity in crates based on available metadata."""
         qpc = catalog_qpc or per_crate or 1
         return total / qpc
@@ -60,9 +57,7 @@ class StockpileService:
         )
         return snapshot_id, len(items), struct_type
 
-    def _map_ocr_data_to_items(
-        self, df: pd.DataFrame, catalog: Dict[str, Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def _map_ocr_data_to_items(self, df: pd.DataFrame, catalog: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Maps OCR DataFrame rows to a list of item dictionaries using the catalog."""
         items = []
         for _, r in df.iterrows():
@@ -121,9 +116,7 @@ class StockpileService:
         # Determine multiplier
         hubs = ["Storage Depot", "Seaport"]
         is_recv_hub = any(h in recv_snap["struct_type"] for h in hubs)
-        is_ship_hub = (
-            any(h in ship_snap["struct_type"] for h in hubs) if ship_snap else False
-        )
+        is_ship_hub = any(h in ship_snap["struct_type"] for h in hubs) if ship_snap else False
         actual_multiplier = min_multiplier or (4.0 if is_recv_hub else 1.0)
 
         # Process inventories
@@ -158,9 +151,7 @@ class StockpileService:
             "recv_snap": recv_snap,
         }
 
-    def _build_inventory_map(
-        self, items: List[Dict[str, Any]]
-    ) -> Dict[Tuple[str, bool], int]:
+    def _build_inventory_map(self, items: List[Dict[str, Any]]) -> Dict[Tuple[str, bool], int]:
         """Builds a map of (code_name, is_crated) to total quantities."""
         total_map: Dict[Tuple[str, bool], int] = {}
         for item in items:
@@ -214,12 +205,8 @@ class StockpileService:
                         }
                     )
 
-            if avail_crates == 0 and (
-                not is_recv_hub or ship_map.get((codename, False), 0) == 0
-            ):
-                comparison_data.append(
-                    {"Item": p["name"], "Avail": 0, "Need": lacking, "is_crated": True}
-                )
+            if avail_crates == 0 and (not is_recv_hub or ship_map.get((codename, False), 0) == 0):
+                comparison_data.append({"Item": p["name"], "Avail": 0, "Need": lacking, "is_crated": True})
 
     def _process_non_priority_requisition(
         self,
@@ -248,9 +235,7 @@ class StockpileService:
                 comparison_data.append(
                     {
                         "Item": codename_to_name.get(cname, cname),
-                        "Avail": self.get_qty_crates(
-                            ship_map[(cname, True)], qpc, per_crate
-                        ),
+                        "Avail": self.get_qty_crates(ship_map[(cname, True)], qpc, per_crate),
                         "Need": 0,
                         "is_crated": True,
                     }
@@ -260,9 +245,7 @@ class StockpileService:
                 comparison_data.append(
                     {
                         "Item": codename_to_name.get(cname, cname),
-                        "Avail": self.get_qty_crates(
-                            ship_map[(cname, False)], qpc, per_crate
-                        ),
+                        "Avail": self.get_qty_crates(ship_map[(cname, False)], qpc, per_crate),
                         "Need": 0,
                         "is_crated": False,
                     }
@@ -284,9 +267,7 @@ class StockpileService:
         processed_results = []
         for r in results:
             dist = calculate_distance(ref_town, r)
-            qty_crates = self.get_qty_crates(
-                r["total"], r.get("catalog_qpc"), r.get("per_crate")
-            )
+            qty_crates = self.get_qty_crates(r["total"], r.get("catalog_qpc"), r.get("per_crate"))
 
             processed_results.append(
                 {

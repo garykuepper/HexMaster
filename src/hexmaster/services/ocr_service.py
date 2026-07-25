@@ -1,7 +1,8 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
+"""Service for interacting with external OCR for image processing."""
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import aiohttp
 import pandas as pd
@@ -10,27 +11,34 @@ import pandas as pd
 class OCRServiceError(Exception):
     """Custom exception for OCR Service failures."""
 
-    def __init__(self, status: int, message: str, technical_details: Optional[str] = None):
+    def __init__(self, status: int, message: str, technical_details: Optional[str] = None) -> None:
+        """Initializes the OCRServiceError."""
         super().__init__(message)
         self.status = status
         self.message = message
         self.technical_details = technical_details
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Returns the string representation of the error."""
         return f"{self.message} (Status: {self.status})"
 
 
 class OCRService:
-    def __init__(self, base_url: str):
+    """Handles communication with the external Foxhole Stockpiles (FS) service."""
+
+    def __init__(self, base_url: str) -> None:
+        """Initializes the OCRService with the base URL."""
         self.base_url = base_url.rstrip("/")
 
     async def process_image(
-        self, image_bytes: bytes, town: str | None = None, label: str | None = None
+        self,
+        image_bytes: bytes,
+        town: Optional[str] = None,
+        label: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Sends image to the Foxhole Stockpiles (FS) service and returns a DataFrame.
         """
-        # FS typically listens on /ocr/scan_image
         url = f"{self.base_url}/ocr/scan_image"
 
         data = aiohttp.FormData()
@@ -47,8 +55,8 @@ class OCRService:
     async def _handle_response(
         self,
         resp: aiohttp.ClientResponse,
-        fallback_town: str | None,
-        fallback_label: str | None,
+        fallback_town: Optional[str],
+        fallback_label: Optional[str],
     ) -> pd.DataFrame:
         """Internal helper to handle the FS JSON response."""
         if resp.status != 200:
@@ -63,46 +71,38 @@ class OCRService:
         if not isinstance(data, dict):
             return pd.DataFrame()
 
-        # FS JSON Structure:
-        # { "name": "...", "type": "...", "items": [...] }
-        # Sometimes nested under 'stockpile' key
+        # FS JSON Structure: { "stockpile": { "name": "...", "type": "...", "items": [...] } }
+        # or it might be raw at the top level.
         stockpile_data = data.get("stockpile")
-        # Robust check: if 'stockpile' exists but is None, or doesn't exist, use 'data'
         if not isinstance(stockpile_data, dict):
             stockpile_data = data
 
-        # Extract Metadata
-        detected_name = stockpile_data.get("name")
-        detected_type = stockpile_data.get("type")
+        return self._parse_items_to_df(stockpile_data, fallback_label)
+
+    def _parse_items_to_df(self, data: Dict[str, Any], fallback_label: Optional[str]) -> pd.DataFrame:
+        """Parses the stockpile items into a standardized DataFrame."""
+        detected_name = data.get("name")
+        detected_type = data.get("type")
 
         final_stockpile_name = detected_name if detected_name else fallback_label
         final_struct_type = detected_type if detected_type else "Unknown"
 
-        items = stockpile_data.get("items", [])
-        if not items and "items" not in stockpile_data:
-            # Maybe the whole 'data' was a list after all?
-            # (Though we checked generic dict above)
-            pass
-
-        # Convert to DataFrame matching the specific columns StockpileService expects
+        items = data.get("items", [])
         rows = []
         for item in items:
-            if not isinstance(item, dict):
-                continue
-            code = item.get("code")
-            if not code:
+            if not isinstance(item, dict) or not item.get("code"):
                 continue
 
             rows.append(
                 {
                     "Structure Type": final_struct_type,
                     "Stockpile Name": final_stockpile_name,
-                    "CodeName": code,
-                    "Name": code,
+                    "CodeName": item["code"],
+                    "Name": item["code"],
                     "Quantity": item.get("quantity", 0),
                     "Crated?": "YES" if item.get("crated") else "NO",
-                    "Per Crate": 0,  # Placeholder, calculated by StockpileService
-                    "Total": 0,  # Placeholder, calculated by StockpileService
+                    "Per Crate": 0,  # Placeholder
+                    "Total": 0,  # Placeholder
                     "Description": "",
                 }
             )

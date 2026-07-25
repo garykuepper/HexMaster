@@ -1,10 +1,11 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
+"""Cog for bot health checks, system status, and administrative utilities."""
 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -12,7 +13,7 @@ from discord.ext import commands
 from sqlalchemy import text
 
 if TYPE_CHECKING:
-    pass
+    from hexmaster.db.repositories.stockpile_repository import StockpileRepository
 
 from hexmaster.utils.datetime_utils import get_age_str
 from hexmaster.utils.discord_utils import (
@@ -24,21 +25,22 @@ from hexmaster.utils.discord_utils import (
 
 
 class HealthCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    """Cog for system health monitoring and diagnostic tools."""
+
+    def __init__(self, bot: commands.Bot) -> None:
+        """Initializes the HealthCog."""
         self.bot = bot
-        # We assume bot is HexMasterBot, but typing it as Any or casting is easier for now to avoid circular imports
-        # at runtime if not careful
-        # self.repo = cast("HexMasterBot", bot).repo
-        # Actually simplest is just ignore or use getattr which is dynamic
-        self.repo = getattr(bot, "repo")
+        self.repo: StockpileRepository = getattr(bot, "repo")
 
     @property
-    def engine(self):
+    def engine(self) -> Any:
+        """Convenience property to access the database engine."""
         return getattr(self.bot, "engine")
 
     @app_commands.command(name="ping", description="Healthcheck and DB connectivity test.")
     @app_commands.default_permissions(administrator=True)
     async def ping(self, interaction: discord.Interaction) -> None:
+        """Checks database connectivity and measures latency."""
         start_time = time.time()
         async with self.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
@@ -53,6 +55,7 @@ class HealthCog(commands.Cog):
     @app_commands.command(name="db_stats", description="Show system database statistics.")
     @app_commands.default_permissions(administrator=True)
     async def db_stats(self, interaction: discord.Interaction) -> None:
+        """Displays counts of snapshots and items in the database."""
         async with self.engine.connect() as conn:
             snapshots = await conn.scalar(text("SELECT COUNT(*) FROM stockpile_snapshots"))
             items = await conn.scalar(text("SELECT COUNT(*) FROM snapshot_items"))
@@ -71,15 +74,10 @@ class HealthCog(commands.Cog):
     async def check_towns(self, interaction: discord.Interaction) -> None:
         """Health check to see if towns are correctly seeded."""
         async with self.engine.connect() as conn:
-            # Join with regions to get the region name instead of ID
             result = await conn.execute(
                 text(
-                    """
-                SELECT t.name, r.name
-                FROM towns t
-                JOIN regions r ON t.region_id = r.id
-                ORDER BY t.name LIMIT 10
-            """
+                    "SELECT t.name, r.name FROM towns t JOIN regions r ON t.region_id = r.id "
+                    "ORDER BY t.name LIMIT 10"
                 )
             )
             rows = result.all()
@@ -145,153 +143,111 @@ class HealthCog(commands.Cog):
     @app_commands.describe(limit="Number of snapshots to show (default 10, max 25)")
     @app_commands.default_permissions(administrator=True)
     async def view_snapshots(self, interaction: discord.Interaction, limit: int = 10) -> None:
+        """Lists the most recent snapshots ingested into the system."""
         limit = max(1, min(limit, 25))
         await interaction.response.defer(ephemeral=True)
 
         try:
             guild_id = interaction.guild_id
             if not guild_id:
-                return await interaction.followup.send("This command can only be used in a server.")
+                await interaction.followup.send("This command can only be used in a server.")
+                return
 
-            results = await self.repo.get_latest_snapshots_summary(guild_id, limit)
+            results = await self.repo.get_latest_snapshots_summary(guild_id, shard=None, limit=limit)
             if not results:
-                return await interaction.followup.send("No snapshots found in the database.")
+                await interaction.followup.send("No snapshots found.")
+                return
 
-            table_rows = []
-            for r in results:
-                age = get_age_str(r["captured_at"])
-                table_rows.append(
-                    [
-                        r["id"],
-                        r["pretty_town"],
-                        r["struct_type"],
-                        r["stockpile_name"],
-                        age,
-                    ]
-                )
-
-            title = f"Latest {len(results)} Snapshots"
+            table_rows = [
+                [
+                    r["id"],
+                    r["pretty_town"],
+                    r["struct_type"],
+                    r["stockpile_name"],
+                    get_age_str(r["captured_at"]),
+                ]
+                for r in results
+            ]
             await render_and_truncate_table(
                 interaction,
                 table_rows,
                 ["ID", "Town", "Type", "Stockpile", "Age"],
-                title,
+                f"Latest {len(results)} Snapshots",
                 as_embed=True,
             )
-
         except Exception as e:
             await interaction.followup.send(f"❌ **Error fetching snapshots:** {str(e)}")
 
     @app_commands.command(name="system_status", description="Comprehensive system health overview.")
     @app_commands.default_permissions(administrator=True)
     async def system_status(self, interaction: discord.Interaction) -> None:
+        """Displays a summary of the bot, database, and API status."""
         await interaction.response.defer(ephemeral=True)
 
         embed = discord.Embed(title="🌐 HexMaster System Status", color=EMBED_COLOR_INFO)
 
-        # 1. Database Status
+        # DB Info
         try:
             async with self.engine.connect() as conn:
-                snapshots = await conn.scalar(text("SELECT COUNT(*) FROM stockpile_snapshots"))
+                snaps = await conn.scalar(text("SELECT COUNT(*) FROM stockpile_snapshots"))
                 items = await conn.scalar(text("SELECT COUNT(*) FROM snapshot_items"))
-                db_status = "✅ Connected"
+                db_st = "✅ Connected"
         except Exception:
-            db_status = "❌ Disconnected"
-            snapshots, items = 0, 0
-
+            db_st, snaps, items = "❌ Disconnected", 0, 0
         embed.add_field(
             name="🗄️ Database",
-            value=f"**Status:** {db_status}\n**Snapshots:** {snapshots}\n**Items:** {items}",
+            value=f"**Status:** {db_st}\n**Snapshots:** {snaps}\n**Items:** {items}",
             inline=True,
         )
 
-        # 2. War API Status
-        war_status = "Unknown"
-        war_num = "N/A"
-        shard_display = "Alpha"
-
+        war_st, war_num, shard = "❌ Offline", "N/A", "Alpha"
         try:
-            guild_id = interaction.guild_id
-            shard_name = "Alpha"  # Default fallback
-            if guild_id and hasattr(self.bot, "settings_repo"):
-                config = await self.bot.settings_repo.get_config(guild_id)
-                if config and config.shard:
-                    shard_name = config.shard
-
-            shard_display = shard_name
-
-            if hasattr(self.bot, "war_service"):
-                war_data = await self.bot.war_service.get_war_status(shard_name)
-                war_num = war_data.get("warNumber", "Unknown")
-                war_status = "✅ Online"
+            settings_repo = getattr(self.bot, "settings_repo", None)
+            war_service = getattr(self.bot, "war_service", None)
+            if interaction.guild_id and settings_repo:
+                conf = await settings_repo.get_config(interaction.guild_id)
+                shard = conf.shard if conf and conf.shard else "Alpha"
+            if war_service:
+                data = await war_service.get_war_status(shard)
+                war_num, war_st = data.get("warNumber", "Unknown"), "✅ Online"
         except Exception:
-            war_status = "❌ Offline"
-
+            pass
         embed.add_field(
             name="⚔️ War API",
-            value=f"**Status:** {war_status}\n**Shard:** {shard_display}\n**Current War:** {war_num}",
+            value=f"**Status:** {war_st}\n**Shard:** {shard}\n**War:** {war_num}",
             inline=True,
         )
 
-        # 3. Bot Status
-        latency = round(self.bot.latency * 1000, 1)
+        # Bot Info
         embed.add_field(
             name="🤖 Bot",
-            value=f"**Latency:** {latency}ms\n**Guilds:** {len(self.bot.guilds)}",
+            value=f"**Latency:** {round(self.bot.latency * 1000, 1)}ms\n**Guilds:** {len(self.bot.guilds)}",
             inline=True,
         )
-
-        embed.set_footer(
-            text=f"Requested by {interaction.user}",
-            icon_url=interaction.user.display_avatar.url,
-        )
         embed.timestamp = discord.utils.utcnow()
-
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="help", description="List all available commands and their usage.")
+    @app_commands.command(name="help", description="List all available commands.")
     async def help(self, interaction: discord.Interaction) -> None:
-        """Shows help information for the bot, dynamically filtered by permissions."""
+        """Displays a dynamic help menu based on user permissions."""
         is_admin = interaction.permissions.administrator
+        embed = discord.Embed(title="🛠️ HexMaster Help", color=EMBED_COLOR_INFO)
 
-        embed = discord.Embed(
-            title="🛠️ HexMaster Command Reference",
-            description="Use these commands to manage and locate stockpile assets.",
-            color=EMBED_COLOR_INFO,
+        logistics = (
+            "• `/report`: Upload snapshot.\n"
+            "• `/inventory`: View town assets.\n"
+            "• `/locate`: Search globally.\n"
+            "• `/requisition`: Calculate needs."
         )
+        embed.add_field(name="🚛 Logistics", value=logistics, inline=False)
 
-        # General Commands
-        general_cmds = "• `/help`: Show this help message.\n"
-        embed.add_field(name="📦 General", value=general_cmds, inline=False)
-
-        # Logistics Commands
-        logistics_cmds = (
-            "• `/report [image] [town] [name]`: File an Intelligence Report (upload screenshot).\n"
-            "• `/inventory [town] [stockpile]`: View the Inventory for a town.\n"
-            "• `/locate [item] [from_town]`: Perform Reconnaissance to locate assets globally.\n"
-            "• `/requisition [shipping] [receiving]`: Calculate a Requisition Order to fill gaps."
-        )
-        embed.add_field(name="🚛 Logistics", value=logistics_cmds, inline=False)
-
-        # Admin Commands (only show if admin)
         if is_admin:
-            admin_cmds = (
-                "• `/system_status`: Comprehensive system health overview.\n"
-                "• `/snapshots [limit]`: View recently uploaded snapshots.\n"
-                "• `/priority list`: List items in the priority list.\n"
-                "• `/priority add [item] [min] [prio]`: Add/Update priority item.\n"
-                "• `/priority remove [item]`: Remove priority item.\n"
-                "• `/ping`: Check DB connectivity.\n"
-                "• `/db_stats`: Show database statistics.\n"
-                "• `/check_towns`: Debug town seeding.\n"
-                "• `/check_regions`: Debug region seeding.\n"
-                "• `/check_priority`: Debug priority list seeding."
-            )
-            embed.add_field(name="🛡️ Administration", value=admin_cmds, inline=False)
+            admin = "• `/system_status`, `/snapshots`, `/check_priority`, `/ping`, `/db_stats`"
+            embed.add_field(name="🛡️ Admin", value=admin, inline=False)
 
-        embed.set_footer(text="HexMaster Logistics Bot • Helping you deliver more.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
+    """Standard setup function for Discord extensions."""
     await bot.add_cog(HealthCog(bot))

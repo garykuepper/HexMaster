@@ -6,11 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+from hexmaster.config import Settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from tabulate import tabulate
-
-from hexmaster.config import Settings
 
 
 def parse_bool(x) -> bool | None:

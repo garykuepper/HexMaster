@@ -1,17 +1,16 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
+"""Service for interacting with the Foxhole WarAPI across multiple shards."""
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
 
 class WarService:
-    """
-    Service for interacting with the Foxhole WarAPI across multiple shards.
-    """
+    """Provides access to WarAPI data with per-shard caching."""
 
     SHARD_URLS = {
         "Alpha": "https://war-service-live.foxholeservices.com/api",
@@ -19,20 +18,21 @@ class WarService:
         "Charlie": "https://war-service-live-3.foxholeservices.com/api",
     }
 
-    def __init__(self, default_base_url: str):
+    def __init__(self, default_base_url: str) -> None:
+        """Initializes the WarService with caching and locks."""
         self.default_base_url = default_base_url
         # Per-shard cache: shard_name -> {"warNumber": int, "last_fetch": datetime}
-        self._shard_caches: dict[str, dict] = {}
+        self._shard_caches: Dict[str, Dict[str, Any]] = {}
         self._cache_duration = timedelta(hours=1)
         self._lock = asyncio.Lock()
 
-    def _get_url(self, shard_name: str | None) -> str:
+    def _get_url(self, shard_name: Optional[str]) -> str:
         """Returns the base URL for a given shard name, or default if not found."""
         if not shard_name:
             return self.default_base_url
         return self.SHARD_URLS.get(shard_name, self.default_base_url)
 
-    async def get_maps(self, shard_name: str | None = None) -> List[str]:
+    async def get_maps(self, shard_name: Optional[str] = None) -> List[str]:
         """Fetches the list of active maps (hexes) from the specified shard."""
         url = f"{self._get_url(shard_name)}/worldconquest/maps"
         async with aiohttp.ClientSession() as session:
@@ -40,9 +40,10 @@ class WarService:
                 if resp.status != 200:
                     error_text = await resp.text()
                     raise RuntimeError(f"WarAPI {shard_name or ''} returned status {resp.status}: {error_text}")
-                return List[str](await resp.json())
+                result = await resp.json()
+                return list(result)
 
-    async def get_war_status(self, shard_name: str | None = None) -> dict:
+    async def get_war_status(self, shard_name: Optional[str] = None) -> Dict[str, Any]:
         """Fetches the current war status from the specified shard."""
         url = f"{self._get_url(shard_name)}/worldconquest/war"
         async with aiohttp.ClientSession() as session:
@@ -50,9 +51,10 @@ class WarService:
                 if resp.status != 200:
                     error_text = await resp.text()
                     raise RuntimeError(f"WarAPI {shard_name or ''} returned status {resp.status}: {error_text}")
-                return dict(await resp.json())
+                result = await resp.json()
+                return dict(result)
 
-    async def get_current_war_number(self, shard_name: str | None = "Alpha") -> Optional[int]:
+    async def get_current_war_number(self, shard_name: str = "Alpha") -> Optional[int]:
         """Fetches the current war number for a shard, using cache if available."""
         async with self._lock:
             now = datetime.now()
@@ -66,12 +68,15 @@ class WarService:
             try:
                 data = await self.get_war_status(shard_key)
                 war_number = data.get("warNumber")
-                self._shard_caches[shard_key] = {"warNumber": war_number, "last_fetch": now}
-                return war_number
+                self._shard_caches[shard_key] = {
+                    "warNumber": war_number,
+                    "last_fetch": now,
+                }
+                return int(war_number) if war_number is not None else None
             except Exception as e:
+                # Log error and fallback to stale cache if available
                 print(f"Error fetching war info for {shard_key}: {e}")
 
-            # Return old cached value even if fetch fails
             return self._shard_caches.get(shard_key, {}).get("warNumber")
 
     async def get_map_dynamic(self, map_name: str, shard_name: str | None = "Alpha") -> dict:

@@ -4,10 +4,9 @@
 import asyncio
 from pathlib import Path
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from hexmaster.config import Settings
 from hexmaster.db.seed_reference import seed_regions_from_csv
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def main():

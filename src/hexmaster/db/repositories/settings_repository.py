@@ -1,6 +1,10 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
 
+"""Database repository for guild-level configuration settings."""
+
+from typing import cast
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -16,9 +20,9 @@ class SettingsRepository:
         async with AsyncSession(self.engine) as session:
             stmt = select(GuildConfig).where(GuildConfig.guild_id == guild_id)
             result = await session.execute(stmt)
-            return result.scalars().first()
+            return cast(GuildConfig | None, result.scalars().first())
 
-    async def upsert_config(self, guild_id: int, faction: str | None = None, shard: str | None = None):
+    async def upsert_config(self, guild_id: int, faction: str | None = None, shard: str | None = None) -> None:
         """Adds or updates the configuration for a guild."""
         async with AsyncSession(self.engine) as session:
             async with session.begin():

@@ -1,44 +1,59 @@
 # Admin Guide: HexMaster Configuration
 
-Administrator permissions are required to run these commands.
+Administrator permissions are required to run these commands. The bot uses these settings to determine faction tracking, API endpoints, and logistics targets.
 
 ## Setup Commands
 
-| Command             | Description                                         |
-| ------------------- | --------------------------------------------------- |
-| `/setup config`     | **Configure Server** settings (Faction, Shard).     |
-| `/setup priorities` | **Load Priority Templates** or clear existing ones. |
-| `/priority add`     | **Add/Update Item** in the priority list.           |
-| `/priority remove`  | **Remove Item** from the priority list.             |
+### `/setup config`
+Defines the server's faction and shard.
+
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `faction` | Choice | No | Current | `Colonial` or `Warden`. |
+| `shard` | Choice | No | `Alpha` | `Alpha`, `Bravo`, or `Charlie`. |
+
+### `/setup priorities`
+Initializes target quantities from templates.
+
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `template` | Choice | **Yes** | - | `Standard Logistics` or `Clear All`. |
+
+> [!TIP]
+> Logistics hubs like Seaports and Storage Depots are automatically calculated with a **4x multiplier** of these target values during requisitions to maintain strategic depth.
+
+### `/setup cleanup_commands`
+Removes old guild-specific commands to resolve duplicates. No parameters.
 
 ---
 
-## Initial Setup
+## Priority Management
 
-Once HexMaster is invited to your server, follow these steps:
+### `/priority add`
+Adds or updates a target for a specific item.
 
-1.  **Configure Faction & Shard**
-    Run `/setup config faction:[Colonial/Warden] shard:[Alpha/Bravo/Charlie]`.
-    - This tells the bot which WarAPI endpoint to use and which faction-specific items to track.
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `item` | String | **Yes** | - | Item name from the catalog. |
+| `min_crates` | Integer | **Yes** | - | The target amount in **crates**. |
+| `priority` | Float | **Yes** | - | Priority weight (Lower numbers rank higher). |
 
-2.  **Initialize Priorities**
-    Run `/setup priorities template:standard` to load a default list of 60+ critical logistics items.
-    - This helps the `/requisition` command know what items are essential.
+### `/priority list`
+Displays the current priority list for the server. No parameters.
 
-## Customizing Priorities
+### `/priority remove`
+Removes an item's target settings.
 
-You can fine-tune your priority list based on current war objectives:
-
-- **Add Item**: `/priority add item_name:[Item] amount:[Target]`
-- **Remove Item**: `/priority remove item_name:[Item]`
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `item` | String | **Yes** | - | Item name (Autocomplete supported). |
 
 ---
 
-## Permissions
+## System Diagnostics
 
-Ensure the bot has permissions to:
-
-- Use Slash Commands
-- Embed Links
-- Attach Files (for report analysis)
-- Read Message History
+- `/system_status`: Comprehensive overview of DB/WarAPI status and latency.
+- `/snapshots [limit]`: View recent report history. `limit` defaults to 10.
+- `/ping`: Simple database and bot latency test.
+- `/db_stats`: Raw counts of snapshots and items in storage.
+- `/check_towns` / `/check_regions` / `/check_priority`: Quick validation of seeded reference data.

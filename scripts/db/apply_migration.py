@@ -3,10 +3,9 @@
 
 import asyncio
 
+from hexmaster.config import Settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from hexmaster.config import Settings
 
 
 async def run_migration():

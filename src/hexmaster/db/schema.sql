@@ -65,9 +65,9 @@ CREATE TABLE snapshot_items (
 
 -- Add foreign key to ensure items in snapshots exist in our catalog
 -- Note: This requires catalog data to be present before snapshot ingestion
-ALTER TABLE snapshot_items 
-  ADD CONSTRAINT fk_snapshot_items_catalog 
-  FOREIGN KEY (code_name, item_name) 
+ALTER TABLE snapshot_items
+  ADD CONSTRAINT fk_snapshot_items_catalog
+  FOREIGN KEY (code_name, item_name)
   REFERENCES catalog_items (codename, displayname);
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_town_struct_name_time

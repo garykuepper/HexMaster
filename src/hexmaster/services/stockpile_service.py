@@ -1,5 +1,8 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
+"""Service for managing stockpile data, OCR ingestion, and requisition logic."""
+
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -8,13 +11,16 @@ from hexmaster.utils.geo_utils import calculate_distance
 
 
 class StockpileService:
-    def __init__(self, repo, ocr_service, war_service=None, routing_service=None):
+    """Orchestrates stockpile snapshots, OCR processing, and business logic."""
+
+    def __init__(self, repo: Any, ocr_service: Any, war_service: Any = None, routing_service: Any = None) -> None:
+        """Initializes the StockpileService with its dependencies."""
         self.repo = repo
         self.ocr_service = ocr_service
         self.war_service = war_service
         self.routing_service = routing_service or RoutingService()
 
-    def get_qty_crates(self, total: float, catalog_qpc: int | None, per_crate: int | None) -> float:
+    def get_qty_crates(self, total: float, catalog_qpc: Optional[int], per_crate: Optional[int]) -> float:
         """Calculates quantity in crates based on available metadata."""
         qpc = catalog_qpc or per_crate or 1
         return total / qpc
@@ -30,11 +36,7 @@ class StockpileService:
         """Parses an image using OCR and catalog lookups, returning a draft payload without committing to DB."""
         shard = shard or "Alpha"
 
-        try:
-            df = await self.ocr_service.process_image(image_bytes, town, stockpile_name)
-        except Exception:
-            raise
-
+        df = await self.ocr_service.process_image(image_bytes, town, stockpile_name)
         if df.empty:
             raise ValueError("OCR returned no data from the image.")
 
@@ -64,12 +66,7 @@ class StockpileService:
                     "Y",
                 )
 
-                if is_crated:
-                    per_crate = qpc
-                    total_qty = quantity * qpc
-                else:
-                    per_crate = qpc
-                    total_qty = quantity
+                total_qty = quantity * qpc if is_crated else quantity
 
                 items.append(
                     {
@@ -77,7 +74,7 @@ class StockpileService:
                         "item_name": real_name,
                         "quantity": quantity,
                         "is_crated": is_crated,
-                        "per_crate": per_crate,
+                        "per_crate": qpc,
                         "total": total_qty,
                         "description": str(r.get("Description", "")).strip(),
                     }
@@ -118,7 +115,7 @@ class StockpileService:
         stockpile_name: str,
         shard: str | None = "Alpha",
         war_number: int | None = None,
-    ):
+    ) -> tuple[int, int, str]:
         """Coordinates the OCR process and database ingestion in a single call."""
         draft = await self.parse_remote_image(guild_id, image_bytes, town, stockpile_name, shard)
         return await self.commit_snapshot_draft(guild_id, draft, war_number)
@@ -128,17 +125,16 @@ class StockpileService:
         guild_id: int,
         shipping_hub: str,
         receiving: str,
-        shard: str | None = "Alpha",
-        min_multiplier: float | None = None,
-        ship_struct: str | None = None,
-        ship_stockpile: str | None = None,
-        recv_struct: str | None = None,
-        recv_stockpile: str | None = None,
-    ):
+        shard: str = "Alpha",
+        min_multiplier: Optional[float] = None,
+        ship_struct: Optional[str] = None,
+        ship_stockpile: Optional[str] = None,
+        recv_struct: Optional[str] = None,
+        recv_stockpile: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Calculates logic for comparing two towns for requisition."""
         shard = shard or "Alpha"
         priority_list = await self.repo.get_priority_list(guild_id)
-
         if not priority_list:
             raise ValueError("Priority list is empty.")
 
@@ -152,126 +148,35 @@ class StockpileService:
         if not recv_snap:
             raise ValueError(f"No snapshots found for receiving town `{receiving}`.")
 
-        # Process inventories into total quantities by (code_name, is_crated)
-        ship_total_map: dict[tuple[str, bool], int] = {}
-        for item in ship_items:
-            key = (item["code_name"], item["is_crated"])
-            ship_total_map[key] = ship_total_map.get(key, 0) + item["total"]
-
-        recv_total_map: dict[str, int] = {}
-        for item in recv_items:
-            recv_total_map[item["code_name"]] = recv_total_map.get(item["code_name"], 0) + item["total"]
-
-        # Determine types
+        # Determine multiplier
         hubs = ["Storage Depot", "Seaport"]
         is_recv_hub = any(h in recv_snap["struct_type"] for h in hubs)
         is_ship_hub = any(h in ship_snap["struct_type"] for h in hubs) if ship_snap else False
+        actual_multiplier = min_multiplier or (4.0 if is_recv_hub else 1.0)
 
-        # Use dynamic defaults if not provided
-        if min_multiplier is None:
-            actual_multiplier = 4.0 if is_recv_hub else 1.0
-        else:
-            actual_multiplier = min_multiplier
+        # Process inventories
+        ship_total_map = self._build_inventory_map(ship_items)
+        recv_total_map = {item["code_name"]: item["total"] for item in recv_items}
+
+        comparison_data: List[Dict[str, Any]] = []
+        handled_codenames: set[str] = set()
+
+        self._process_priority_requisition(
+            priority_list,
+            actual_multiplier,
+            ship_total_map,
+            recv_total_map,
+            is_recv_hub,
+            comparison_data,
+            handled_codenames,
+        )
+        self._process_non_priority_requisition(
+            ship_items, ship_total_map, handled_codenames, is_recv_hub, comparison_data
+        )
 
         warning = ""
         if ship_snap and not is_ship_hub:
             warning = f"⚠️ **Warning**: `{shipping_hub}` is a `{ship_snap['struct_type']}`, not a Hub.\n"
-
-        comparison_data = []
-        handled_codenames = set()
-
-        # Process Priority Items
-        for p in priority_list:
-            codename = p["codename"]
-            handled_codenames.add(codename)
-
-            qty_per_crate = p["qty_per_crate"] or 1
-            base_min_crates = p["min_for_base_crates"] or 0
-            target_min_crates = base_min_crates * actual_multiplier
-
-            held_crates = recv_total_map.get(codename, 0) / qty_per_crate
-            lacking_crates = target_min_crates - held_crates
-
-            if lacking_crates > 0:
-                # For priority items, we usually just want to know if we can fill the need.
-                # However, we still need to respect the display rules.
-                # Since priority items are usually requested in crates, we look for crates first.
-
-                # Check for crates
-                avail_crates_crated = ship_total_map.get((codename, True), 0) / qty_per_crate
-                if avail_crates_crated > 0:
-                    comparison_data.append(
-                        {
-                            "Item": p["name"],
-                            "Avail": avail_crates_crated,
-                            "Need": lacking_crates,
-                            "is_crated": True,
-                        }
-                    )
-
-                # Check for loose items if destination is a HUB
-                if is_recv_hub:
-                    avail_crates_loose = ship_total_map.get((codename, False), 0) / qty_per_crate
-                    if avail_crates_loose > 0:
-                        comparison_data.append(
-                            {
-                                "Item": p["name"],
-                                "Avail": avail_crates_loose,
-                                "Need": lacking_crates,  # Same need, just different source form
-                                "is_crated": False,
-                            }
-                        )
-
-                # If neither found but needed, show 0 avail (defaulting to crate view for priority)
-                if avail_crates_crated == 0 and (not is_recv_hub or (is_recv_hub and avail_crates_loose == 0)):
-                    comparison_data.append(
-                        {
-                            "Item": p["name"],
-                            "Avail": 0,
-                            "Need": lacking_crates,
-                            "is_crated": True,
-                        }
-                    )
-
-        # Process Non-Priority Items
-        # Gather all code names present in shipping
-        ship_codenames = {k[0] for k in ship_total_map.keys()}
-        non_priority_codenames = ship_codenames - handled_codenames
-
-        item_details_map = {i["code_name"]: i for i in ship_items}
-        codename_to_name = {i["code_name"]: i["item_name"] for i in ship_items}
-
-        for codename in sorted(non_priority_codenames, key=lambda c: codename_to_name.get(c, c)):
-            item_ref = item_details_map.get(codename)
-            qpc = item_ref.get("catalog_qpc") if item_ref else None
-            per_crate = item_ref.get("per_crate") if item_ref else None
-
-            # Check Crated
-            ship_total_crated = ship_total_map.get((codename, True), 0)
-            if ship_total_crated > 0:
-                qty_crates = self.get_qty_crates(ship_total_crated, qpc, per_crate)
-                comparison_data.append(
-                    {
-                        "Item": codename_to_name.get(codename, codename),
-                        "Avail": qty_crates,
-                        "Need": 0,
-                        "is_crated": True,
-                    }
-                )
-
-            # Check Loose - ONLY if destination is a HUB
-            if is_recv_hub:
-                ship_total_loose = ship_total_map.get((codename, False), 0)
-                if ship_total_loose > 0:
-                    qty_crates = self.get_qty_crates(ship_total_loose, qpc, per_crate)
-                    comparison_data.append(
-                        {
-                            "Item": codename_to_name.get(codename, codename),
-                            "Avail": qty_crates,
-                            "Need": 0,
-                            "is_crated": False,
-                        }
-                    )
 
         return {
             "comparison_data": comparison_data,
@@ -281,6 +186,106 @@ class StockpileService:
             "recv_snap": recv_snap,
         }
 
+    def _build_inventory_map(self, items: List[Dict[str, Any]]) -> Dict[Tuple[str, bool], int]:
+        """Builds a map of (code_name, is_crated) to total quantities."""
+        total_map: Dict[Tuple[str, bool], int] = {}
+        for item in items:
+            key = (item["code_name"], item["is_crated"])
+            total_map[key] = total_map.get(key, 0) + item["total"]
+        return total_map
+
+    def _process_priority_requisition(
+        self,
+        priority_list: List[Dict[str, Any]],
+        multiplier: float,
+        ship_map: Dict[Tuple[str, bool], int],
+        recv_map: Dict[str, int],
+        is_recv_hub: bool,
+        comparison_data: List[Dict[str, Any]],
+        handled_codenames: set[str],
+    ) -> None:
+        """Calculates needs for high-priority items."""
+        for p in priority_list:
+            codename = p["codename"]
+            handled_codenames.add(codename)
+
+            qty_per_crate = p["qty_per_crate"] or 1
+            target_min_crates = (p["min_for_base_crates"] or 0) * multiplier
+            held_crates = recv_map.get(codename, 0) / qty_per_crate
+            lacking = target_min_crates - held_crates
+
+            if lacking <= 0:
+                continue
+
+            avail_crates = ship_map.get((codename, True), 0) / qty_per_crate
+            if avail_crates > 0:
+                comparison_data.append(
+                    {
+                        "Item": p["name"],
+                        "Avail": avail_crates,
+                        "Need": lacking,
+                        "is_crated": True,
+                    }
+                )
+
+            if is_recv_hub:
+                avail_loose = ship_map.get((codename, False), 0) / qty_per_crate
+                if avail_loose > 0:
+                    comparison_data.append(
+                        {
+                            "Item": p["name"],
+                            "Avail": avail_loose,
+                            "Need": lacking,
+                            "is_crated": False,
+                        }
+                    )
+
+            if avail_crates == 0 and (not is_recv_hub or ship_map.get((codename, False), 0) == 0):
+                comparison_data.append({"Item": p["name"], "Avail": 0, "Need": lacking, "is_crated": True})
+
+    def _process_non_priority_requisition(
+        self,
+        ship_items: List[Dict[str, Any]],
+        ship_map: Dict[Tuple[str, bool], int],
+        handled: set[str],
+        is_recv_hub: bool,
+        comparison_data: List[Dict[str, Any]],
+    ) -> None:
+        """Calculates availability for all other items in the shipping town."""
+        ship_codenames = {k[0] for k in ship_map.keys()}
+        non_priority = ship_codenames - handled
+
+        item_details = {i["code_name"]: i for i in ship_items}
+        codename_to_name = {i["code_name"]: i["item_name"] for i in ship_items}
+
+        for cname in sorted(non_priority, key=lambda c: codename_to_name.get(c, c)):
+            item_ref = item_details.get(cname)
+            if not item_ref:
+                continue
+
+            qpc = item_ref.get("catalog_qpc")
+            per_crate = item_ref.get("per_crate")
+
+            if ship_map.get((cname, True), 0) > 0:
+                comparison_data.append(
+                    {
+                        "Item": codename_to_name.get(cname, cname),
+                        "Avail": self.get_qty_crates(ship_map[(cname, True)], qpc, per_crate),
+                        "Need": 0,
+                        "is_crated": True,
+                    }
+                )
+
+            if is_recv_hub and ship_map.get((cname, False), 0) > 0:
+                comparison_data.append(
+                    {
+                        "Item": codename_to_name.get(cname, cname),
+                        "Avail": self.get_qty_crates(ship_map[(cname, False)], qpc, per_crate),
+                        "Need": 0,
+                        "is_crated": False,
+                    }
+                )
+
     async def locate_item(
         self,
         guild_id: int,
@@ -288,11 +293,10 @@ class StockpileService:
         from_town: str,
         shard: str | None = "Alpha",
         user_faction: str = "Colonial",
-    ):
+    ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
         """Locates an item, calculates distance, and evaluates safe routes via Dijkstra pathfinding."""
         shard = shard or "Alpha"
         ref_town = await self.repo.get_town_data(from_town)
-
         if not ref_town:
             raise ValueError(f"Town `{from_town}` not found.")
 

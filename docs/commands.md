@@ -1,53 +1,67 @@
 # User Guide: HexMaster Commands
 
-HexMaster provides several commands for stockpile management and reconnaissance.
+HexMaster provides several logistics and reconnaissance commands to help your faction manage stockpiles effectively.
 
-## Command List
-
-| Command          | Description                                                           |
-| ---------------- | --------------------------------------------------------------------- |
-| `/report`        | **File an Intelligence Report** by uploading a stockpile screenshot.  |
-| `/inventory`     | **View the Inventory** for a specific town or base.                   |
-| `/locate`        | **Perform Reconnaissance** to find an item's location across the map. |
-| `/requisition`   | **Calculate a Requisition Order** to identify supply gaps.            |
-| `/priority list` | **View the Priority List** for your current server.                   |
-| `/help`          | Display the command list and lore.                                    |
-
----
-
-## Command Details
+## Core Commands
 
 ### `/report`
 
-Upload a screenshot of a Foxhole stockpile (Seaport, Warehouse, or Base). HexMaster's OCR will process the items and update the database.
+Files an intelligence report by uploading a screenshot to the OCR service.
 
-- **Tip**: Ensure the screenshot is clear and includes the item icons and quantities.
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `image` | Attachment | **Yes** | - | The stockpile screenshot file. |
+| `town` | String | **Yes** | - | The name of the town (Autocomplete supported). |
+| `stockpile` | String | No | `Public` | The name of the stockpile. |
 
 ### `/inventory`
 
-Check the current stock of a specific location.
+Displays the current items and quantities for a specific location.
 
-- **Parameters**: `location` (Town or Base name).
-- **Behavior**: Shows a list of crates and loose items available in that stockpile based on the latest report.
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `town` | String | **Yes** | - | The name of the town (Autocomplete supported). |
+| `structure` | String | No | `All` | Filter by structure type (e.g., `Seaport`, `Depot`). |
+| `stockpile` | String | No | `All` | Filter by a specific stockpile name. |
+
+- **Report Age**: The output header explicitly lists the **age** of the latest report (e.g., `(2h ago)`), so you know how fresh the intelligence is.
 
 ### `/locate`
 
-Search for a specific item across all tracked stockpiles.
+Searches globally for an item, sorted by distance from your reference town.
 
-- **Parameters**: `item_name` and `reference_location`.
-- **Behavior**: Sorts results by distance from the reference location, helping you find the nearest supply source.
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `item` | String | **Yes** | - | The item name (Autocomplete from tracked items). |
+| `from_town` | String | **Yes** | - | Your current location for distance calculation. |
 
 ### `/requisition`
 
-Compare two stockpiles to see what's needed.
+Calculates a logistics order between two towns based on server priorities.
 
-- **Parameters**: `hub` (Source) and `base` (Destination).
-- **Behavior**: Highlights shortages and standardizes quantities into crates. It automatically applies a 4x multiplier for hubs like Seaports.
+| Parameter | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `ship_town` | String | **Yes** | - | The town supplying the goods (Autocomplete shows Hubs with reports). |
+| `recv_town` | String | **Yes** | - | The destination town (Autocomplete shows towns with reports). |
+| `ship_struct` | String | No | `All` | Specific shipping structure filter. |
+| `ship_stockpile`| String | No | `All` | Specific shipping stockpile filter. |
+| `recv_struct` | String | No | `All` | Specific receiving structure filter. |
+| `recv_stockpile`| String | No | `All` | Specific receiving stockpile filter. |
+| `multiplier` | Float | No | `Auto`* | Multiplier for targets. |
 
-### `/priority list`
+- **Automatic Multiplier**: For major logistics hubs (**Seaports** and **Storage Depots**), HexMaster automatically applies a **4x multiplier** to the target quantities from the priority list. Bases default to **1x**.
+- **Report Tracking**: Shows the age of reports for both the shipping and receiving locations.
 
-Displays the list of items prioritized by your server admins. Useful for knowing what to focus on during logistics runs.
+---
 
-### `/help`
+## Tips & Table Features
 
-Provides a quick reference to all commands and a bit of lore about the bot.
+All tabular outputs are color-coded.
+
+- **Autocompletes**: Most parameters like `town`, `item`, and `structure` provide autocompletes based on current reports. Town lookups in `/inventory` and `/requisition` only show locations that have already been reported to the system.
+- **Color-Coded Tables**:
+  - 🟢 **Green**: Stockpile meets or exceeds the target priority level.
+  - 🔴 **Red**: Stockpile is below target and requires supply.
+  - 🟡 **Yellow**: (Requisition only) Item is available at the shipping source but target is not yet met.
+- **Pagination**: If an inventory or search list is longer than 20 rows, use the **Previous** and **Next** buttons to flip through pages.
+- **Lore & Help**: Use `/help` for a quick command summary and system status overview.

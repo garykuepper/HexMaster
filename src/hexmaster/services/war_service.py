@@ -73,3 +73,44 @@ class WarService:
 
             # Return old cached value even if fetch fails
             return self._shard_caches.get(shard_key, {}).get("warNumber")
+
+    async def get_map_dynamic(self, map_name: str, shard_name: str | None = "Alpha") -> dict:
+        """Fetches dynamic map items (town halls, forts, faction flags) for a specific hex."""
+        url = f"{self._get_url(shard_name)}/worldconquest/maps/{map_name}/dynamic/public"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return {}
+                return dict(await resp.json())
+
+    async def get_hex_ownership(self, shard_name: str | None = "Alpha") -> dict[str, str]:
+        """
+        Compiles a dict mapping hex map names to dominant controlling faction
+        (e.g., {'TheFingersHex': 'COLONIAL', 'MarbanHollow': 'WARDEN'}).
+        """
+        hex_control: dict[str, str] = {}
+        try:
+            maps = await self.get_maps(shard_name)
+            for map_name in maps:
+                data = await self.get_map_dynamic(map_name, shard_name)
+                map_items = data.get("mapItems", [])
+                faction_counts: dict[str, int] = {"COLONIAL": 0, "WARDEN": 0}
+                for item in map_items:
+                    team = item.get("team")
+                    if team in faction_counts:
+                        faction_counts[team] += 1
+
+                col_count = faction_counts["COLONIAL"]
+                war_count = faction_counts["WARDEN"]
+
+                if col_count > war_count:
+                    hex_control[map_name] = "COLONIAL"
+                elif war_count > col_count:
+                    hex_control[map_name] = "WARDEN"
+                else:
+                    hex_control[map_name] = "NEUTRAL"
+        except Exception as e:
+            print(f"Error compiling hex ownership for {shard_name}: {e}")
+
+        return hex_control
+

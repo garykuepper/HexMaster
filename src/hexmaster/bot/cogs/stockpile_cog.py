@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from hexmaster.bot.views.ocr_review_view import OCRReviewView, build_review_embed
 from hexmaster.db.repositories.settings_repository import SettingsRepository
 from hexmaster.services.ocr_service import OCRServiceError
 from hexmaster.services.stockpile_service import StockpileService
@@ -154,19 +155,15 @@ class StockpileCog(commands.Cog):
             shard = await self._get_shard(guild_id)
             war_number = await self.war_service.get_current_war_number(shard) if self.war_service else None
 
-            snapshot_id, count, struct_type = await self.service.process_remote_and_ingest(
-                guild_id, image_bytes, town, stockpile, shard, war_number
+            draft = await self.service.parse_remote_image(guild_id, image_bytes, town, stockpile, shard)
+            embed = build_review_embed(draft)
+            view = OCRReviewView(
+                service=self.service,
+                guild_id=guild_id,
+                draft_payload=draft,
+                war_number=war_number,
             )
-            # Show the inventory table immediately for feedback
-            success_msg = f"Imported {count} items. Snapshot ID: `{snapshot_id}`"
-            await self._send_inventory_results(
-                interaction,
-                guild_id,
-                town,
-                struct_type,
-                stockpile,
-                success_msg=success_msg,
-            )
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         except OCRServiceError as e:
             print(f"OCR Service Error: {e.message}\nDetails: {e.technical_details}")
             await send_error(
@@ -599,7 +596,12 @@ class StockpileCog(commands.Cog):
 
         try:
             shard = await self._get_shard(guild_id)
-            results, ref_town_data = await self.service.locate_item(guild_id, item, ref_town, shard)
+            config = await self.settings_repo.get_config(guild_id)
+            user_faction: str = (config.faction if config and config.faction else "Colonial")
+
+            results, ref_town_data = await self.service.locate_item(
+                guild_id, item, ref_town, shard, user_faction=user_faction
+            )
             if not results:
                 return await send_error(interaction, f"`{item}` is not in any stockpile.")
 
@@ -613,6 +615,12 @@ class StockpileCog(commands.Cog):
                 else:
                     status = "🟡"
 
+                route_badge = "🟢 Safe"
+                if d.get("RouteStatus") == "HAZARD":
+                    route_badge = "🟡 Hazard"
+                elif d.get("RouteStatus") == "BLOCKED":
+                    route_badge = "🔴 Blocked"
+
                 table_rows.append(
                     [
                         d["Town"][:12],
@@ -622,6 +630,7 @@ class StockpileCog(commands.Cog):
                         f"{d['Dist']:.1f}",
                         get_age_str(d["captured_at"]),
                         status,
+                        route_badge,
                     ]
                 )
 
@@ -632,7 +641,7 @@ class StockpileCog(commands.Cog):
             await render_and_truncate_table(
                 interaction,
                 table_rows,
-                ["Town", "Stockp", "Type", "Qty", "Hex", "Age", "S"],
+                ["Town", "Stockp", "Type", "Qty", "Hex", "Age", "S", "Route"],
                 title,
                 as_embed=True,
             )

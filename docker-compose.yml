@@ -4,6 +4,7 @@ services:
     image: postgres:16
     container_name: hexmaster_db
     environment:
+      TZ: America/Los_Angeles  # Add this line
       POSTGRES_DB: hexmaster
       POSTGRES_USER: hexmaster
       POSTGRES_PASSWORD: hexmaster
@@ -28,6 +29,7 @@ services:
     env_file:
       - .env
     environment:
+      - TZ=America/Los_Angeles  # Add this line
       - DATABASE_URL=postgresql+asyncpg://hexmaster:hexmaster@127.0.0.1:5432/hexmaster
       - OCR_URL=http://localhost:8000
       - WARAPI_BASE_URL=https://war-service-live.foxholeservices.com/api

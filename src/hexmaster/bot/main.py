@@ -63,6 +63,10 @@ class HexMasterBot(commands.Bot):
         await self.load_extension("hexmaster.bot.cogs.health")
         await self.load_extension("hexmaster.bot.cogs.priority_cog")
         await self.load_extension("hexmaster.bot.cogs.setup_cog")
+        await self.load_extension("hexmaster.bot.cogs.code_cog")
+        await self.load_extension("hexmaster.bot.cogs.deficit_cog")
+        await self.load_extension("hexmaster.bot.cogs.operation_cog")
+        await self.load_extension("hexmaster.bot.cogs.analytics_cog")
 
         # 4. Syncing globally (Guild agnostic)
         await self.tree.sync()

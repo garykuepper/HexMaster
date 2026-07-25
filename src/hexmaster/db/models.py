@@ -112,3 +112,55 @@ class Region(Base):
     r: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     distance_to_origin: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ReserveStockpileCode(Base):
+    """Tracks 6-digit reserve stockpile codes and 48-hour expiration timers."""
+
+    __tablename__ = "reserve_stockpile_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    town: Mapped[str] = mapped_column(String(100), index=True)
+    struct_type: Mapped[str] = mapped_column(String(100))
+    stockpile_name: Mapped[str] = mapped_column(String(255))
+    access_code: Mapped[str] = mapped_column(String(10))
+    last_refreshed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    alert_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    alert_level: Mapped[int] = mapped_column(Integer, default=0)  # 0=normal, 1=6h, 2=2h
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class OperationTemplate(Base):
+    """Regiment operation loadout manifest template."""
+
+    __tablename__ = "operation_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    name: Mapped[str] = mapped_column(String(100), index=True)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    items: Mapped[List["OperationTemplateItem"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan"
+    )
+
+
+class OperationTemplateItem(Base):
+    """Individual item requirements within an operation template."""
+
+    __tablename__ = "operation_template_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("operation_templates.id", ondelete="CASCADE"))
+    code_name: Mapped[str] = mapped_column(String(100))
+    item_name: Mapped[str] = mapped_column(String(255))
+    required_crates: Mapped[int] = mapped_column(Integer, default=1)
+
+    template: Mapped["OperationTemplate"] = relationship(back_populates="items")
+
+

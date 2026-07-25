@@ -3,52 +3,48 @@
 
 import pandas as pd
 
+from hexmaster.services.routing_service import RoutingService
 from hexmaster.utils.geo_utils import calculate_distance
 
 
 class StockpileService:
-    def __init__(self, repo, ocr_service, war_service=None):
+    def __init__(self, repo, ocr_service, war_service=None, routing_service=None):
         self.repo = repo
         self.ocr_service = ocr_service
         self.war_service = war_service
+        self.routing_service = routing_service or RoutingService()
 
     def get_qty_crates(self, total: float, catalog_qpc: int | None, per_crate: int | None) -> float:
         """Calculates quantity in crates based on available metadata."""
         qpc = catalog_qpc or per_crate or 1
         return total / qpc
 
-    async def process_remote_and_ingest(
+    async def parse_remote_image(
         self,
         guild_id: int,
         image_bytes: bytes,
         town: str,
-        stockpile_name: str,
+        stockpile_name: str = "Public",
         shard: str | None = "Alpha",
-        war_number: int | None = None,
-    ):
-        """Coordinates the OCR process and database ingestion."""
+    ) -> dict:
+        """Parses an image using OCR and catalog lookups, returning a draft payload without committing to DB."""
         shard = shard or "Alpha"
 
         try:
-            # town and stockpile_name passed here are used as fallbacks if FS fails to detect them
             df = await self.ocr_service.process_image(image_bytes, town, stockpile_name)
         except Exception:
-            # Let OCRServiceError bubble up to the cog for better formatting
             raise
 
         if df.empty:
             raise ValueError("OCR returned no data from the image.")
 
-        # Extract metadata from the first row (populated by OCRService)
         first_row = df.iloc[0]
         struct_type = str(first_row.get("Structure Type", "Unknown")).strip()
 
-        # Priority: OCR Detected Name > User Fallback (if default set to "Public")
         detected_stockpile = str(first_row.get("Stockpile Name", "")).strip()
         if detected_stockpile:
             stockpile_name = detected_stockpile
 
-        # --- UPDATED LOOKUP LOGIC ---
         code_to_details = await self.repo.get_catalog_items()
 
         items = []
@@ -68,12 +64,11 @@ class StockpileService:
                     "Y",
                 )
 
-                # Calculate total and per_crate based on is_crated flag
                 if is_crated:
                     per_crate = qpc
                     total_qty = quantity * qpc
                 else:
-                    per_crate = qpc  # Still store the expected crate size
+                    per_crate = qpc
                     total_qty = quantity
 
                 items.append(
@@ -88,10 +83,45 @@ class StockpileService:
                     }
                 )
 
+        return {
+            "guild_id": guild_id,
+            "shard": shard,
+            "town": town,
+            "struct_type": struct_type,
+            "stockpile_name": stockpile_name,
+            "items": items,
+        }
+
+    async def commit_snapshot_draft(
+        self,
+        guild_id: int,
+        draft_payload: dict,
+        war_number: int | None = None,
+    ) -> tuple[int, int, str]:
+        """Commits an approved snapshot draft to the database."""
+        shard = draft_payload.get("shard", "Alpha")
+        town = draft_payload["town"]
+        struct_type = draft_payload["struct_type"]
+        stockpile_name = draft_payload["stockpile_name"]
+        items = draft_payload.get("items", [])
+
         snapshot_id = await self.repo.ingest_snapshot(
             guild_id, shard, town, struct_type, stockpile_name, items, war_number
         )
         return snapshot_id, len(items), struct_type
+
+    async def process_remote_and_ingest(
+        self,
+        guild_id: int,
+        image_bytes: bytes,
+        town: str,
+        stockpile_name: str,
+        shard: str | None = "Alpha",
+        war_number: int | None = None,
+    ):
+        """Coordinates the OCR process and database ingestion in a single call."""
+        draft = await self.parse_remote_image(guild_id, image_bytes, town, stockpile_name, shard)
+        return await self.commit_snapshot_draft(guild_id, draft, war_number)
 
     async def get_requisition_comparison(
         self,
@@ -251,8 +281,15 @@ class StockpileService:
             "recv_snap": recv_snap,
         }
 
-    async def locate_item(self, guild_id: int, item: str, from_town: str, shard: str | None = "Alpha"):
-        """Locates an item and calculates distances from a reference town for a specific shard."""
+    async def locate_item(
+        self,
+        guild_id: int,
+        item: str,
+        from_town: str,
+        shard: str | None = "Alpha",
+        user_faction: str = "Colonial",
+    ):
+        """Locates an item, calculates distance, and evaluates safe routes via Dijkstra pathfinding."""
         shard = shard or "Alpha"
         ref_town = await self.repo.get_town_data(from_town)
 
@@ -263,21 +300,193 @@ class StockpileService:
         if not results:
             return None, ref_town
 
+        hex_control = {}
+        if self.war_service:
+            try:
+                hex_control = await self.war_service.get_hex_ownership(shard)
+            except Exception as e:
+                print(f"Failed to fetch hex ownership for routing: {e}")
+
         processed_results = []
         for r in results:
             dist = calculate_distance(ref_town, r)
             qty_crates = self.get_qty_crates(r["total"], r.get("catalog_qpc"), r.get("per_crate"))
+            dest_town = r["town"]
+
+            route_info = self.routing_service.find_safe_route(
+                start_town_or_hex=from_town,
+                end_town_or_hex=dest_town,
+                hex_control=hex_control,
+                user_faction=user_faction,
+            )
 
             processed_results.append(
                 {
-                    "Town": r["town"],
+                    "Town": dest_town,
                     "Stockpile": r["stockpile_name"],
                     "Type": r["struct_type"],
                     "Qty": qty_crates,
                     "Dist": dist,
                     "captured_at": r.get("captured_at"),
+                    "RouteStatus": route_info["status"],
+                    "RouteHops": route_info["hops"],
+                    "RoutePath": route_info["path"],
+                    "HazardHexes": route_info["hazard_hexes"],
                 }
             )
 
         processed_results.sort(key=lambda x: x["Dist"])
         return processed_results, ref_town
+
+    async def check_priority_deficits(self, guild_id: int, shard: str | None = "Alpha") -> list[dict]:
+        """Scans town inventories against priority minimums and finds nearest safe supply hubs for deficits."""
+        shard = shard or "Alpha"
+        towns = await self.repo.get_towns_with_snapshots(guild_id, shard)
+        priority_list = await self.repo.get_priority_list(guild_id)
+        if not priority_list or not towns:
+            return []
+
+        deficits = []
+
+        for town in towns:
+            rows = await self.repo.get_latest_inventory(guild_id, shard, town)
+            if not rows:
+                continue
+
+            struct_type = rows[0]["struct_type"]
+            is_hub = any(h in struct_type for h in ["Storage Depot", "Seaport"])
+            actual_multiplier = 4.0 if is_hub else 1.0
+
+            held_crates_map: dict[str, float] = {}
+            for r in rows:
+                cname = r["code_name"]
+                qpc = r.get("catalog_qpc") or r.get("per_crate") or 1
+                crates = r["total"] / qpc
+                held_crates_map[cname] = held_crates_map.get(cname, 0.0) + crates
+
+            for p in priority_list:
+                cname = p["codename"]
+                min_crates = (p.get("min_for_base_crates") or 0) * actual_multiplier
+                held = held_crates_map.get(cname, 0.0)
+                if min_crates > 0 and held < min_crates:
+                    deficit_amt = min_crates - held
+
+                    # Search nearest supply
+                    locate_res, _ = await self.locate_item(guild_id, p["name"], town, shard)
+                    nearest_supply = None
+                    if locate_res:
+                        safe_options = [
+                            x for x in locate_res if x["RouteStatus"] in ("SAFE", "HAZARD") and x["Qty"] > 0
+                        ]
+                        if safe_options:
+                            nearest_supply = safe_options[0]
+
+                    deficits.append(
+                        {
+                            "town": town,
+                            "struct_type": struct_type,
+                            "item_name": p["name"],
+                            "codename": cname,
+                            "held_crates": round(held, 1),
+                            "min_crates": round(min_crates, 1),
+                            "deficit_crates": round(deficit_amt, 1),
+                            "nearest_supply": nearest_supply,
+                        }
+                    )
+
+        return deficits
+
+    async def check_operation_readiness(
+        self, guild_id: int, template_name: str, shipping_hub: str, shard: str | None = "Alpha"
+    ) -> dict:
+        """Audits shipping hub inventory against an operation manifest template."""
+        shard = shard or "Alpha"
+        templates = await self.repo.get_operation_templates(guild_id, template_name)
+        if not templates:
+            raise ValueError(f"Operation template `{template_name}` not found.")
+
+        tmpl = templates[0]
+        snap, items = await self.repo.get_latest_snapshot_for_town_filtered(guild_id, shard, shipping_hub)
+        if not snap:
+            raise ValueError(f"No snapshots found for hub `{shipping_hub}`.")
+
+        hub_stock_map: dict[str, float] = {}
+        for i in items:
+            cname = i["code_name"]
+            qpc = i.get("catalog_qpc") or i.get("per_crate") or 1
+            crates = i["total"] / qpc
+            hub_stock_map[cname] = hub_stock_map.get(cname, 0.0) + crates
+
+        audit_results = []
+        fully_ready = True
+
+        for req in tmpl["items"]:
+            cname = req["code_name"]
+            needed = req["required_crates"]
+            avail = hub_stock_map.get(cname, 0.0)
+            status = "🟢" if avail >= needed else ("🟡" if avail > 0 else "🔴")
+            if avail < needed:
+                fully_ready = False
+
+            audit_results.append(
+                {
+                    "item_name": req["item_name"],
+                    "required": needed,
+                    "available": round(avail, 1),
+                    "status": status,
+                }
+            )
+
+        return {
+            "template_name": tmpl["name"],
+            "hub": shipping_hub,
+            "fully_ready": fully_ready,
+            "items": audit_results,
+            "snap_captured_at": snap.get("captured_at"),
+        }
+
+    async def get_stockpile_analytics(
+        self, guild_id: int, town: str, hours: int = 48, shard: str | None = "Alpha"
+    ) -> dict:
+        """Computes crate consumption and production burn rates over recent snapshot history."""
+        shard = shard or "Alpha"
+        history = await self.repo.get_snapshot_history_for_town(guild_id, town, hours, shard)
+        if not history:
+            return {"town": town, "hours": hours, "rates": []}
+
+        df = pd.DataFrame([dict(r) for r in history])
+
+        # Group by item and compute start vs end total quantity diffs
+        rates = []
+        for cname, group in df.groupby("code_name"):
+            group = group.sort_values("captured_at")
+            if len(group) < 2:
+                continue
+
+            first_row = group.iloc[0]
+            last_row = group.iloc[-1]
+
+            t_start = first_row["captured_at"]
+            t_end = last_row["captured_at"]
+            time_diff_hours = (t_end - t_start).total_seconds() / 3600.0
+            if time_diff_hours <= 0:
+                continue
+
+            qpc = last_row.get("catalog_qpc") or last_row.get("per_crate") or 1
+            crates_start = first_row["total"] / qpc
+            crates_end = last_row["total"] / qpc
+            delta_crates = crates_end - crates_start
+            burn_rate_per_hour = delta_crates / time_diff_hours
+
+            rates.append(
+                {
+                    "item_name": last_row["item_name"],
+                    "start_crates": round(crates_start, 1),
+                    "end_crates": round(crates_end, 1),
+                    "delta_crates": round(delta_crates, 1),
+                    "rate_per_hour": round(burn_rate_per_hour, 2),
+                }
+            )
+
+        rates.sort(key=lambda x: x["rate_per_hour"])
+        return {"town": town, "hours": hours, "rates": rates}

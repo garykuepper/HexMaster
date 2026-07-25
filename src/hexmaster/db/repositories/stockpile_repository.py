@@ -1,15 +1,18 @@
 # Copyright (c) 2024-2025 Gary Kuepper
 # Licensed under the MIT License.
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import desc, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from hexmaster.db.models import (
     CatalogItem,
+    OperationTemplate,
+    OperationTemplateItem,
     Priority,
     Region,
+    ReserveStockpileCode,
     SnapshotItem,
     StockpileSnapshot,
     Town,
@@ -486,3 +489,253 @@ class StockpileRepository:
             stmt = select(CatalogItem).where(CatalogItem.displayname == displayname)
             res = await conn.execute(stmt)
             return res.mappings().first()
+
+    async def upsert_reserve_code(
+        self,
+        guild_id: int,
+        town: str,
+        struct_type: str,
+        stockpile_name: str,
+        access_code: str,
+        user_id: int | None = None,
+        channel_id: int | None = None,
+    ) -> int:
+        """Registers or updates a 6-digit reserve stockpile code."""
+        async with self.engine.begin() as conn:
+            norm_town = self._normalize_name(town)
+            norm_stockpile = stockpile_name.strip()
+
+            # Check if active entry exists
+            stmt_check = (
+                select(ReserveStockpileCode.id)
+                .where(ReserveStockpileCode.guild_id == guild_id)
+                .where(ReserveStockpileCode.town == norm_town)
+                .where(ReserveStockpileCode.stockpile_name == norm_stockpile)
+                .where(ReserveStockpileCode.is_active)
+            )
+            res = await conn.execute(stmt_check)
+            existing_id = res.scalar()
+
+            now = datetime.now(timezone.utc)
+            if existing_id:
+                from sqlalchemy import update
+
+                stmt_update = (
+                    update(ReserveStockpileCode)
+                    .where(ReserveStockpileCode.id == existing_id)
+                    .values(
+                        access_code=access_code.strip(),
+                        struct_type=struct_type.strip(),
+                        last_refreshed_at=now,
+                        alert_level=0,
+                        alert_channel_id=channel_id,
+                    )
+                )
+                await conn.execute(stmt_update)
+                return existing_id
+            else:
+                stmt_insert = (
+                    insert(ReserveStockpileCode)
+                    .values(
+                        guild_id=guild_id,
+                        town=norm_town,
+                        struct_type=struct_type.strip(),
+                        stockpile_name=norm_stockpile,
+                        access_code=access_code.strip(),
+                        last_refreshed_at=now,
+                        created_by_user_id=user_id,
+                        alert_channel_id=channel_id,
+                        alert_level=0,
+                        is_active=True,
+                    )
+                    .returning(ReserveStockpileCode.id)
+                )
+                res_ins = await conn.execute(stmt_insert)
+                return res_ins.scalar_one()
+
+    async def refresh_reserve_code(self, guild_id: int, town: str, stockpile_name: str) -> bool:
+        """Resets the 48-hour expiration timer for a reserve code to now."""
+        async with self.engine.begin() as conn:
+            from sqlalchemy import update
+
+            norm_town = self._normalize_name(town)
+            norm_stockpile = stockpile_name.strip()
+            now = datetime.now(timezone.utc)
+
+            stmt = (
+                update(ReserveStockpileCode)
+                .where(ReserveStockpileCode.guild_id == guild_id)
+                .where(ReserveStockpileCode.town == norm_town)
+                .where(ReserveStockpileCode.stockpile_name == norm_stockpile)
+                .where(ReserveStockpileCode.is_active)
+                .values(last_refreshed_at=now, alert_level=0)
+            )
+            res = await conn.execute(stmt)
+            return res.rowcount > 0
+
+    async def get_active_reserve_codes(self, guild_id: int | None = None) -> list[ReserveStockpileCode]:
+        """Fetches all active reserve stockpile codes for a guild (or all guilds if None)."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async with AsyncSession(self.engine) as session:
+            stmt = select(ReserveStockpileCode).where(ReserveStockpileCode.is_active)
+            if guild_id:
+                stmt = stmt.where(ReserveStockpileCode.guild_id == guild_id)
+            stmt = stmt.order_by(ReserveStockpileCode.last_refreshed_at)
+            res = await session.execute(stmt)
+            return list(res.scalars().all())
+
+    async def update_code_alert_level(self, code_id: int, alert_level: int) -> None:
+        """Updates the notification alert level (0=normal, 1=6h warning, 2=2h emergency)."""
+        async with self.engine.begin() as conn:
+            from sqlalchemy import update
+
+            stmt = (
+                update(ReserveStockpileCode)
+                .where(ReserveStockpileCode.id == code_id)
+                .values(alert_level=alert_level)
+            )
+            await conn.execute(stmt)
+
+    async def deactivate_reserve_code(self, code_id: int) -> None:
+        """Deactivates an expired reserve code entry."""
+        async with self.engine.begin() as conn:
+            from sqlalchemy import update
+
+            stmt = update(ReserveStockpileCode).where(ReserveStockpileCode.id == code_id).values(is_active=False)
+            await conn.execute(stmt)
+
+    async def upsert_operation_template(
+        self,
+        guild_id: int,
+        name: str,
+        items_data: list[dict],
+        user_id: int | None = None,
+    ) -> int:
+        """Creates or replaces an operation loadout template for a guild."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async with AsyncSession(self.engine) as session:
+            async with session.begin():
+                # Delete existing template if name matches
+                stmt_del = (
+                    select(OperationTemplate)
+                    .where(OperationTemplate.guild_id == guild_id)
+                    .where(OperationTemplate.name == name.strip())
+                )
+                res_del = await session.execute(stmt_del)
+                existing = res_del.scalar_one_or_none()
+                if existing:
+                    await session.delete(existing)
+                    await session.flush()
+
+                template = OperationTemplate(
+                    guild_id=guild_id,
+                    name=name.strip(),
+                    created_by_user_id=user_id,
+                )
+                session.add(template)
+                await session.flush()
+                tmpl_id = template.id
+
+                for item in items_data:
+                    item_obj = OperationTemplateItem(
+                        template_id=tmpl_id,
+                        code_name=item.get("code_name", ""),
+                        item_name=item.get("item_name", item.get("code_name", "")),
+                        required_crates=item.get("required_crates", 1),
+                    )
+                    session.add(item_obj)
+
+                return tmpl_id
+
+    async def get_operation_templates(
+        self, guild_id: int, name: str | None = None
+    ) -> list[dict]:
+        """Fetches operation loadout templates and items for a guild."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async with AsyncSession(self.engine) as session:
+            stmt = select(OperationTemplate).where(OperationTemplate.guild_id == guild_id)
+            if name:
+                stmt = stmt.where(OperationTemplate.name == name.strip())
+            res = await session.execute(stmt)
+            templates = res.scalars().all()
+
+            results = []
+            for t in templates:
+                items_stmt = select(OperationTemplateItem).where(OperationTemplateItem.template_id == t.id)
+                items_res = await session.execute(items_stmt)
+                items_list = items_res.scalars().all()
+
+                results.append(
+                    {
+                        "id": t.id,
+                        "name": t.name,
+                        "created_by_user_id": t.created_by_user_id,
+                        "created_at": t.created_at,
+                        "items": [
+                            {
+                                "code_name": i.code_name,
+                                "item_name": i.item_name,
+                                "required_crates": i.required_crates,
+                            }
+                            for i in items_list
+                        ],
+                    }
+                )
+            return results
+
+    async def delete_operation_template(self, guild_id: int, name: str) -> bool:
+        """Deletes an operation template by name."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async with AsyncSession(self.engine) as session:
+            async with session.begin():
+                stmt = (
+                    select(OperationTemplate)
+                    .where(OperationTemplate.guild_id == guild_id)
+                    .where(OperationTemplate.name == name.strip())
+                )
+                res = await session.execute(stmt)
+                t = res.scalar_one_or_none()
+                if t:
+                    await session.delete(t)
+                    await session.commit()
+                    return True
+                return False
+
+    async def get_snapshot_history_for_town(
+        self, guild_id: int, town: str, hours: int = 48, shard: str | None = "Alpha"
+    ):
+        """Fetches historical snapshots and item quantities for a town over the last N hours."""
+        norm_town = self._normalize_name(town)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        async with self.engine.connect() as conn:
+            stmt = (
+                select(
+                    StockpileSnapshot.id,
+                    StockpileSnapshot.captured_at,
+                    StockpileSnapshot.struct_type,
+                    StockpileSnapshot.stockpile_name,
+                    SnapshotItem.code_name,
+                    SnapshotItem.item_name,
+                    SnapshotItem.quantity,
+                    SnapshotItem.is_crated,
+                    SnapshotItem.total,
+                    CatalogItem.quantitypercrate.label("catalog_qpc"),
+                    SnapshotItem.per_crate,
+                )
+                .join(SnapshotItem, SnapshotItem.snapshot_id == StockpileSnapshot.id)
+                .join(CatalogItem, CatalogItem.codename == SnapshotItem.code_name)
+                .where(StockpileSnapshot.guild_id == guild_id)
+                .where(StockpileSnapshot.town == norm_town)
+                .where(StockpileSnapshot.captured_at >= cutoff)
+            )
+            if shard:
+                stmt = stmt.where(StockpileSnapshot.shard == shard)
+
+            stmt = stmt.order_by(StockpileSnapshot.captured_at)
+            res = await conn.execute(stmt)
+            return res.mappings().all()
